@@ -4,7 +4,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/AgusMolinaCode/DCA_Api.git/internal/server"
+	"github.com/AgusMolinaCode/DCA_Api.git/internal/database"
+	"github.com/AgusMolinaCode/DCA_Api.git/internal/middleware"
+	routes "github.com/AgusMolinaCode/DCA_Api.git/internal/server"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
@@ -20,6 +22,15 @@ func main() {
 
 	// Configurar las rutas
 	routes.RegisterRoutes(router)
+
+	// Inicializar base de datos
+	if err := database.InitDB(); err != nil {
+		log.Fatalf("Error al inicializar la base de datos: %v", err)
+	}
+	defer database.DB.Close()
+
+	// Inicializar auth
+	middleware.InitAuth()
 
 	// Iniciar el servidor
 	port := os.Getenv("PORT")
