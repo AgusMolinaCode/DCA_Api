@@ -70,6 +70,15 @@ func GenerateToken(userId string) (string, error) {
 	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
 }
 
+func GenerateResetToken(email string) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"email": email,
+		"exp":   time.Now().Add(time.Hour * 24).Unix(),
+	})
+
+	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+}
+
 func Login(c *gin.Context) {
 	var login struct {
 		Email    string `json:"email" binding:"required,email"`
