@@ -62,9 +62,7 @@ func RequestResetPassword(c *gin.Context) {
 		return
 	}
 
-	resetURL := "http://localhost:8080/reset-password?token=" + token
-
-	err = services.SendEmail(user.Email, "Recuperación de Contraseña", "Para recuperar tu contraseña, por favor visita: "+resetURL)
+	err = services.SendPasswordResetEmail(user.Email, token)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al enviar email"})
 		return

@@ -33,5 +33,26 @@ func InitDB() error {
 	);`
 
 	_, err = DB.Exec(createTableSQL)
+	if err != nil {
+		return err
+	}
+
+	// Crear tabla de transacciones crypto
+	createCryptoTableSQL := `
+	CREATE TABLE IF NOT EXISTS crypto_transactions (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		crypto_name TEXT NOT NULL,
+		ticker TEXT NOT NULL,
+		amount REAL NOT NULL,
+		purchase_price REAL NOT NULL,
+		total REAL NOT NULL,
+		date DATETIME NOT NULL,
+		note TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(user_id) REFERENCES users(id)
+	);`
+
+	_, err = DB.Exec(createCryptoTableSQL)
 	return err
 }

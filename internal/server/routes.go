@@ -1,11 +1,21 @@
 package routes
 
 import (
+	"github.com/AgusMolinaCode/DCA_Api.git/internal/database"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/middleware"
 	"github.com/gin-gonic/gin"
 )
 
 func RegisterRoutes(router *gin.Engine) {
+	// Inicializar base de datos primero
+	if err := database.InitDB(); err != nil {
+		panic(err)
+	}
+
+	// Luego inicializar repositorios
+	middleware.InitAuth()
+	middleware.InitCrypto()
+
 	router.POST("/signup", middleware.Signup)
 	router.POST("/login", middleware.Login)
 
@@ -14,9 +24,8 @@ func RegisterRoutes(router *gin.Engine) {
 	{
 		protected.PUT("/users", middleware.UpdateUser)
 		protected.DELETE("/users", middleware.DeleteUser)
-		// protected.GET("/events", getEvents)
-		// protected.POST("/events", createEvent)
-		// ... otras rutas protegidas
+		protected.POST("/transactions", middleware.CreateTransaction)
+		protected.GET("/transactions", middleware.GetUserTransactions)
 	}
 
 	// Rutas de admin
