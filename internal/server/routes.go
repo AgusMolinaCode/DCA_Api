@@ -26,6 +26,11 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.DELETE("/users", middleware.DeleteUser)
 		protected.POST("/transactions", middleware.CreateTransaction)
 		protected.GET("/transactions", middleware.GetUserTransactions)
+		protected.GET("/transactions/:id", middleware.GetTransactionDetails)
+		protected.GET("/recent-transactions", middleware.GetRecentTransactions)
+		protected.GET("/dashboard", middleware.GetDashboard)
+		protected.GET("/performance", middleware.GetPerformance)
+		protected.GET("/holdings", middleware.GetHoldings)
 	}
 
 	// Rutas de admin
