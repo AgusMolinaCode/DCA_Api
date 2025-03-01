@@ -137,3 +137,20 @@ func GetHoldings(c *gin.Context) {
 
 	c.JSON(http.StatusOK, holdings)
 }
+
+func GetCurrentBalance(c *gin.Context) {
+	userID := c.GetString("userId")
+
+	holdings, err := cryptoRepo.GetHoldings(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener el balance actual"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total_current_value": holdings.TotalCurrentValue,
+		"total_invested":      holdings.TotalInvested,
+		"total_profit":        holdings.TotalProfit,
+		"profit_percentage":   holdings.ProfitPercentage,
+	})
+}

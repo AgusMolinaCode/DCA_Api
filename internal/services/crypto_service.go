@@ -16,8 +16,6 @@ func GetCryptoPrice(ticker string) (*models.Welcome, error) {
 	url := fmt.Sprintf("https://min-api.cryptocompare.com/data/pricemultifull?fsyms=%s&tsyms=USD&api_key=%s",
 		ticker, apiKey)
 
-	log.Printf("Consultando API para %s: %s", ticker, url)
-
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Printf("Error haciendo la petición HTTP para %s: %v", ticker, err)

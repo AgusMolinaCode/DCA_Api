@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"sort"
 
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/models"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/services"
@@ -299,10 +298,12 @@ func (r *CryptoRepository) GetPerformance(userID string) (*models.Performance, e
 }
 
 func (r *CryptoRepository) GetHoldings(userID string) (*models.Holdings, error) {
+	// Consulta para obtener detalles de transacciones por ticker
 	query := `
 		SELECT 
 			ticker,
-			SUM(amount) as holdings
+			SUM(amount) as total_amount,
+			SUM(total) as total_invested
 		FROM crypto_transactions 
 		WHERE user_id = ?
 		GROUP BY ticker`
@@ -313,17 +314,18 @@ func (r *CryptoRepository) GetHoldings(userID string) (*models.Holdings, error) 
 	}
 	defer rows.Close()
 
-	var holdings []models.HoldingDetail
-	totalValue := 0.0
+	var totalCurrentValue float64
+	var totalInvested float64
 
-	// Primero, calculamos el valor total y recopilamos todos los holdings
+	// Procesar cada ticker
 	for rows.Next() {
 		var ticker string
-		var amount float64
-		if err := rows.Scan(&ticker, &amount); err != nil {
+		var amount, totalInvestedTicker float64
+		if err := rows.Scan(&ticker, &amount, &totalInvestedTicker); err != nil {
 			return nil, err
 		}
 
+		// Obtener precio actual
 		cryptoData, err := services.GetCryptoPrice(ticker)
 		if err != nil {
 			log.Printf("Error obteniendo precio para %s: %v", ticker, err)
@@ -331,40 +333,22 @@ func (r *CryptoRepository) GetHoldings(userID string) (*models.Holdings, error) 
 		}
 
 		if cryptoData.Raw[ticker]["USD"].PRICE > 0 {
-			value := amount * cryptoData.Raw[ticker]["USD"].PRICE
-			totalValue += value
-			holdings = append(holdings, models.HoldingDetail{
-				Ticker: ticker,
-				Value:  value,
-			})
+			currentPrice := cryptoData.Raw[ticker]["USD"].PRICE
+			currentValue := amount * currentPrice
+
+			totalCurrentValue += currentValue
+			totalInvested += totalInvestedTicker
 		}
 	}
 
-	// Calcular porcentajes y separar en principales y otros
-	const MINIMUM_PERCENTAGE = 1.0 // Holdings menores al 1% irán a Other Assets
-	var result models.Holdings
-	result.TotalValue = totalValue
+	// Calcular porcentajes y profit total
+	totalProfit := totalCurrentValue - totalInvested
+	profitPercentage := (totalProfit / totalInvested) * 100
 
-	for i := range holdings {
-		holdings[i].Percentage = (holdings[i].Value / totalValue) * 100
-
-		if holdings[i].Percentage >= MINIMUM_PERCENTAGE {
-			result.MainHoldings = append(result.MainHoldings, holdings[i])
-		} else {
-			result.OtherAssets = append(result.OtherAssets, holdings[i])
-			result.OtherPercentage += holdings[i].Percentage
-		}
-	}
-
-	// Ordenar MainHoldings por porcentaje descendente
-	sort.Slice(result.MainHoldings, func(i, j int) bool {
-		return result.MainHoldings[i].Percentage > result.MainHoldings[j].Percentage
-	})
-
-	// Ordenar OtherAssets por porcentaje descendente
-	sort.Slice(result.OtherAssets, func(i, j int) bool {
-		return result.OtherAssets[i].Percentage > result.OtherAssets[j].Percentage
-	})
-
-	return &result, nil
+	return &models.Holdings{
+		TotalCurrentValue: totalCurrentValue,
+		TotalInvested:     totalInvested,
+		TotalProfit:       totalProfit,
+		ProfitPercentage:  profitPercentage,
+	}, nil
 }

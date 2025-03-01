@@ -31,6 +31,7 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.GET("/dashboard", middleware.GetDashboard)
 		protected.GET("/performance", middleware.GetPerformance)
 		protected.GET("/holdings", middleware.GetHoldings)
+		protected.GET("/current-balance", middleware.GetCurrentBalance)
 	}
 
 	// Rutas de admin

@@ -1,89 +1,56 @@
 package services
 
 import (
-	"bytes"
-	"html/template"
+	"fmt"
+	"log"
 	"net/smtp"
 	"os"
 )
 
-const resetPasswordTemplate = `
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        .container {
-            padding: 20px;
-            font-family: Arial, sans-serif;
-        }
-        .button {
-            background-color: #4CAF50;
-            border: none;
-            color: white;
-            padding: 15px 32px;
-            text-align: center;
-            text-decoration: none;
-            display: inline-block;
-            font-size: 16px;
-            margin: 4px 2px;
-            cursor: pointer;
-            border-radius: 4px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>Recuperación de Contraseña</h2>
-        <p>Hola,</p>
-        <p>Has solicitado restablecer tu contraseña. Haz clic en el siguiente enlace para continuar:</p>
-        <p>
-            <a href="{{.ResetURL}}" class="button">Restablecer Contraseña</a>
-        </p>
-        <p>O copia y pega el siguiente token:</p>
-        <p><strong>{{.Token}}</strong></p>
-        <p>Este enlace expirará en 24 horas.</p>
-        <p>Si no solicitaste restablecer tu contraseña, puedes ignorar este mensaje.</p>
-        <br>
-        <p>Saludos,<br>El equipo de soporte</p>
-    </div>
-</body>
-</html>
-`
+func SendPasswordResetEmail(email, token string) error {
+	// Obtener configuración de email desde variables de entorno
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+	smtpUser := os.Getenv("SMTP_USER")
+	smtpPass := os.Getenv("SMTP_PASS")
+	fromEmail := os.Getenv("FROM_EMAIL")
 
-type EmailData struct {
-	ResetURL string
-	Token    string
-}
-
-func SendPasswordResetEmail(to, token string) error {
-	from := os.Getenv("EMAIL_FROM")
-	pass := os.Getenv("EMAIL_PASSWORD")
-
-	data := EmailData{
-		ResetURL: "http://localhost:8080/reset-password?token=" + token,
-		Token:    token,
+	// Si no hay configuración de email, solo registramos el token y simulamos éxito
+	if smtpHost == "" || smtpPort == "" || smtpUser == "" || smtpPass == "" {
+		log.Printf("Configuración de email no encontrada. Token para %s: %s", email, token)
+		return nil
 	}
 
-	// Crear template
-	t, err := template.New("resetPassword").Parse(resetPasswordTemplate)
-	if err != nil {
-		return err
-	}
+	// Configurar autenticación
+	auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
 
-	// Ejecutar template
-	var body bytes.Buffer
-	if err := t.Execute(&body, data); err != nil {
-		return err
-	}
+	// Construir mensaje
+	to := []string{email}
+	subject := "Restablecimiento de contraseña"
+	body := fmt.Sprintf(`
+	<html>
+	<body>
+		<h2>Restablecimiento de contraseña</h2>
+		<p>Has solicitado restablecer tu contraseña. Utiliza el siguiente token:</p>
+		<p><strong>%s</strong></p>
+		<p>Si no has solicitado este cambio, puedes ignorar este correo.</p>
+	</body>
+	</html>
+	`, token)
 
-	// Crear mensaje
-	mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n"
-	subject := "Subject: Recuperación de Contraseña\n"
-	msg := []byte(subject + mime + body.String())
+	message := fmt.Sprintf("To: %s\r\n"+
+		"Subject: %s\r\n"+
+		"MIME-Version: 1.0\r\n"+
+		"Content-Type: text/html; charset=UTF-8\r\n"+
+		"\r\n"+
+		"%s\r\n", email, subject, body)
 
 	// Enviar email
-	auth := smtp.PlainAuth("", from, pass, "smtp.gmail.com")
-	err = smtp.SendMail("smtp.gmail.com:587", auth, from, []string{to}, msg)
+	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, fromEmail, to, []byte(message))
+	if err != nil {
+		log.Printf("Error al enviar email: %v", err)
+		return err
+	}
 
-	return err
+	return nil
 }
