@@ -2,71 +2,176 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
-	"sort"
 
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/models"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/services"
 )
 
+// CryptoRepository maneja las operaciones de base de datos para criptomonedas
 type CryptoRepository struct {
-	db *sql.DB
+	db           *sql.DB
+	holdingsRepo *HoldingsRepository
 }
 
+// NewCryptoRepository crea un nuevo repositorio de criptomonedas
 func NewCryptoRepository(db *sql.DB) *CryptoRepository {
-	return &CryptoRepository{db: db}
-}
-
-func (r *CryptoRepository) CreateTransaction(tx *models.CryptoTransaction) error {
-	query := `
-		INSERT INTO crypto_transactions (id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, type, usdt_received)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-
-	_, err := r.db.Exec(query,
-		tx.ID,
-		tx.UserID,
-		tx.CryptoName,
-		tx.Ticker,
-		tx.Amount,
-		tx.PurchasePrice,
-		tx.Total,
-		tx.Date,
-		tx.Note,
-		tx.Type,
-		tx.USDTReceived,
-	)
-
-	// Si es una venta, actualizar las tenencias
-	if tx.Type == models.TransactionTypeSell {
-		err = r.UpdateHoldingsAfterSale(tx)
-		if err != nil {
-			return fmt.Errorf("error al actualizar holdings después de la venta: %v", err)
-		}
+	return &CryptoRepository{
+		db:           db,
+		holdingsRepo: NewHoldingsRepository(db),
 	}
-
-	return err
 }
 
-func (r *CryptoRepository) UpdateHoldingsAfterSale(tx *models.CryptoTransaction) error {
-	// Verificar que el usuario tenga suficiente cantidad para vender
-	query := `
-		SELECT SUM(amount) as total_amount
-		FROM crypto_transactions 
-		WHERE user_id = ? AND ticker = ?`
+// CreateTransaction crea una nueva transacción de criptomoneda
+func (r *CryptoRepository) CreateTransaction(transaction models.CryptoTransaction) error {
+	// Iniciar una transacción SQL
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
 
-	var totalAmount float64
-	err := r.db.QueryRow(query, tx.UserID, tx.Ticker).Scan(&totalAmount)
+	// Insertar la transacción
+	query := `
+		INSERT INTO crypto_transactions (
+			id, user_id, crypto_name, ticker, amount, purchase_price, 
+			total, date, note, created_at, type, usdt_received
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err = tx.Exec(
+		query,
+		transaction.ID,
+		transaction.UserID,
+		transaction.CryptoName,
+		transaction.Ticker,
+		transaction.Amount,
+		transaction.PurchasePrice,
+		transaction.Total,
+		transaction.Date,
+		transaction.Note,
+		transaction.CreatedAt,
+		transaction.Type,
+		transaction.USDTReceived,
+	)
 	if err != nil {
 		return err
 	}
 
-	// Si la cantidad a vender es mayor que la disponible, retornar error
-	if tx.Amount > totalAmount {
-		return fmt.Errorf("cantidad insuficiente para vender: disponible %.8f, solicitado %.8f", totalAmount, tx.Amount)
+	// Si es una venta, verificar si hay suficiente criptomoneda para vender
+	if transaction.Type == models.TransactionTypeSell {
+		err = r.holdingsRepo.UpdateHoldingsAfterSale(tx, transaction.UserID, transaction.Ticker, transaction.Amount)
+		if err != nil {
+			return err
+		}
+
+		// Si se recibió USDT, crear una transacción de compra de USDT
+		if transaction.USDTReceived > 0 {
+			// Crear una nueva transacción para la compra de USDT
+			usdtTransaction := models.CryptoTransaction{
+				ID:            fmt.Sprintf("%s-usdt", transaction.ID),
+				UserID:        transaction.UserID,
+				CryptoName:    "Tether",
+				Ticker:        "USDT",
+				Amount:        transaction.USDTReceived,
+				PurchasePrice: 1.0, // USDT está anclado a 1 USD
+				Total:         transaction.USDTReceived,
+				Date:          transaction.Date,
+				Note:          fmt.Sprintf("Compra automática de USDT por venta de %s", transaction.Ticker),
+				CreatedAt:     transaction.CreatedAt,
+				Type:          models.TransactionTypeBuy,
+				USDTReceived:  0,
+			}
+
+			// Insertar la transacción de USDT
+			_, err = tx.Exec(
+				query,
+				usdtTransaction.ID,
+				usdtTransaction.UserID,
+				usdtTransaction.CryptoName,
+				usdtTransaction.Ticker,
+				usdtTransaction.Amount,
+				usdtTransaction.PurchasePrice,
+				usdtTransaction.Total,
+				usdtTransaction.Date,
+				usdtTransaction.Note,
+				usdtTransaction.CreatedAt,
+				usdtTransaction.Type,
+				usdtTransaction.USDTReceived,
+			)
+			if err != nil {
+				// Loguear el error pero no detener el flujo
+				log.Printf("Error al crear transacción de USDT: %v", err)
+			}
+		}
 	}
 
 	return nil
+}
+
+// UpdateTransaction actualiza una transacción existente
+func (r *CryptoRepository) UpdateTransaction(transaction models.CryptoTransaction) error {
+	// Verificar que la transacción pertenezca al usuario
+	var count int
+	err := r.db.QueryRow("SELECT COUNT(*) FROM crypto_transactions WHERE id = ? AND user_id = ?",
+		transaction.ID, transaction.UserID).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("transacción no encontrada o no tienes permiso para modificarla")
+	}
+
+	// Actualizar la transacción
+	query := `
+		UPDATE crypto_transactions
+		SET crypto_name = ?, ticker = ?, amount = ?, purchase_price = ?, 
+			total = ?, date = ?, note = ?, type = ?, usdt_received = ?
+		WHERE id = ? AND user_id = ?
+	`
+
+	_, err = r.db.Exec(
+		query,
+		transaction.CryptoName,
+		transaction.Ticker,
+		transaction.Amount,
+		transaction.PurchasePrice,
+		transaction.Total,
+		transaction.Date,
+		transaction.Note,
+		transaction.Type,
+		transaction.USDTReceived,
+		transaction.ID,
+		transaction.UserID,
+	)
+	return err
+}
+
+// DeleteTransaction elimina una transacción
+func (r *CryptoRepository) DeleteTransaction(userID, transactionID string) error {
+	// Verificar que la transacción pertenezca al usuario
+	var count int
+	err := r.db.QueryRow("SELECT COUNT(*) FROM crypto_transactions WHERE id = ? AND user_id = ?",
+		transactionID, userID).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("transacción no encontrada o no tienes permiso para eliminarla")
+	}
+
+	// Eliminar la transacción
+	_, err = r.db.Exec("DELETE FROM crypto_transactions WHERE id = ? AND user_id = ?",
+		transactionID, userID)
+	return err
 }
 
 func (r *CryptoRepository) GetUserTransactions(userID string) ([]models.CryptoTransaction, error) {
@@ -108,78 +213,118 @@ func (r *CryptoRepository) GetUserTransactions(userID string) ([]models.CryptoTr
 }
 
 func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDashboard, error) {
+	// Obtener todas las transacciones del usuario
 	query := `
-		SELECT 
-			ticker,
-			SUM(CASE WHEN type = 'compra' THEN amount ELSE -amount END) as holdings,
-			SUM(CASE WHEN type = 'compra' THEN total ELSE -total END) as total_invested,
-			(SUM(CASE WHEN type = 'compra' THEN total ELSE 0 END) / 
-			 SUM(CASE WHEN type = 'compra' THEN amount ELSE 0 END)) as avg_price
-		FROM crypto_transactions 
+		SELECT ticker, crypto_name, amount, purchase_price, total, type
+		FROM crypto_transactions
 		WHERE user_id = ?
-		GROUP BY ticker
-		HAVING holdings > 0`
+		ORDER BY date DESC`
 
 	rows, err := r.db.Query(query, userID)
 	if err != nil {
-		log.Printf("Error en la consulta SQL: %v", err)
-		return nil, fmt.Errorf("error en la consulta SQL: %v", err)
+		return nil, err
 	}
 	defer rows.Close()
 
-	var dashboards []models.CryptoDashboard
+	// Mapa para acumular datos por criptomoneda
+	cryptoMap := make(map[string]*models.CryptoDashboard)
+
+	// Procesar cada transacción
 	for rows.Next() {
-		var d models.CryptoDashboard
-		err := rows.Scan(
-			&d.Ticker,
-			&d.Holdings,
-			&d.TotalInvested,
-			&d.AvgPrice,
-		)
+		var ticker, cryptoName, txType string
+		var amount, purchasePrice, total float64
+
+		err := rows.Scan(&ticker, &cryptoName, &amount, &purchasePrice, &total, &txType)
 		if err != nil {
-			log.Printf("Error escaneando resultados: %v", err)
-			return nil, fmt.Errorf("error escaneando resultados: %v", err)
+			return nil, err
 		}
 
-		log.Printf("Procesando ticker: %s", d.Ticker)
+		// Si es USDT, tratarlo de manera especial
+		if ticker == "USDT" {
+			// Inicializar si no existe
+			if _, exists := cryptoMap[ticker]; !exists {
+				cryptoMap[ticker] = &models.CryptoDashboard{
+					Ticker:        ticker,
+					TotalInvested: 0,
+					Holdings:      0,
+					AvgPrice:      1.0,
+					CurrentPrice:  1.0,
+				}
+			}
 
-		// Caso especial para USDT: total_invested debe ser igual a holdings
-		if d.Ticker == "USDT" {
-			d.TotalInvested = d.Holdings
-			d.AvgPrice = 1.0
-			d.CurrentPrice = 1.0
-			d.CurrentProfit = 0.0
-			d.ProfitPercent = 0.0
-			dashboards = append(dashboards, d)
-			log.Printf("USDT procesado con valores ajustados: holdings=%f, total_invested=%f", d.Holdings, d.TotalInvested)
+			// Actualizar tenencias
+			if txType == models.TransactionTypeBuy {
+				cryptoMap[ticker].Holdings += amount
+				cryptoMap[ticker].TotalInvested += amount
+			} else if txType == models.TransactionTypeSell {
+				cryptoMap[ticker].Holdings -= amount
+			}
+
+			// Para USDT, siempre mantener TotalInvested = Holdings
+			cryptoMap[ticker].TotalInvested = cryptoMap[ticker].Holdings
+			cryptoMap[ticker].CurrentProfit = 0
+			cryptoMap[ticker].ProfitPercent = 0
 			continue
 		}
 
-		// Obtener precio actual para otras criptomonedas
-		cryptoData, err := services.GetCryptoPrice(d.Ticker)
-		if err != nil {
-			log.Printf("Error obteniendo precio para %s: %v", d.Ticker, err)
-			continue // Continuamos con la siguiente criptomoneda en caso de error
+		// Para otras criptomonedas
+		if _, exists := cryptoMap[ticker]; !exists {
+			cryptoMap[ticker] = &models.CryptoDashboard{
+				Ticker:        ticker,
+				TotalInvested: 0,
+				Holdings:      0,
+			}
 		}
 
-		// Acceder dinámicamente a los datos usando el ticker
-		if cryptoData.Raw[d.Ticker]["USD"].PRICE > 0 {
-			d.CurrentPrice = cryptoData.Raw[d.Ticker]["USD"].PRICE
-			d.CurrentProfit = (d.CurrentPrice * d.Holdings) - d.TotalInvested
-			d.ProfitPercent = (d.CurrentProfit / d.TotalInvested) * 100
-			dashboards = append(dashboards, d)
-			log.Printf("Datos procesados exitosamente para %s", d.Ticker)
-		} else {
-			log.Printf("No se encontraron datos de precio para %s", d.Ticker)
+		// Actualizar tenencias según el tipo de transacción
+		if txType == models.TransactionTypeBuy {
+			cryptoMap[ticker].Holdings += amount
+			// Si el precio de compra es 0, intentar obtener el precio actual
+			if purchasePrice <= 0 {
+				// Obtener precio actual para calcular el total
+				cryptoData, err := services.GetCryptoPrice(ticker)
+				if err == nil && cryptoData != nil {
+					purchasePrice = cryptoData.Raw[ticker]["USD"].PRICE
+					total = amount * purchasePrice
+				} else {
+					// Si no se puede obtener el precio, usar un valor predeterminado
+					purchasePrice = 1.0
+					total = amount
+				}
+			}
+			cryptoMap[ticker].TotalInvested += total
+		} else if txType == models.TransactionTypeSell {
+			cryptoMap[ticker].Holdings -= amount
 		}
 	}
 
-	if len(dashboards) == 0 {
-		log.Print("No se encontraron datos para ninguna criptomoneda")
-		return nil, fmt.Errorf("no se encontraron datos para ninguna criptomoneda")
+	// Convertir el mapa a un slice
+	dashboard := make([]models.CryptoDashboard, 0, len(cryptoMap))
+	for _, crypto := range cryptoMap {
+		// Solo incluir criptomonedas con tenencias positivas
+		if crypto.Holdings > 0 {
+			// Calcular precio promedio
+			if crypto.Holdings > 0 && crypto.TotalInvested > 0 {
+				crypto.AvgPrice = crypto.TotalInvested / crypto.Holdings
+			}
+
+			// Obtener precio actual
+			if crypto.Ticker != "USDT" {
+				cryptoData, err := services.GetCryptoPrice(crypto.Ticker)
+				if err == nil {
+					crypto.CurrentPrice = cryptoData.Raw[crypto.Ticker]["USD"].PRICE
+					crypto.CurrentProfit = (crypto.CurrentPrice - crypto.AvgPrice) * crypto.Holdings
+					if crypto.TotalInvested > 0 {
+						crypto.ProfitPercent = (crypto.CurrentProfit / crypto.TotalInvested) * 100
+					}
+				}
+			}
+
+			dashboard = append(dashboard, *crypto)
+		}
 	}
 
-	return dashboards, nil
+	return dashboard, nil
 }
 
 func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID string) (*models.TransactionDetails, error) {
@@ -230,7 +375,7 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]models.TransactionDetails, error) {
 	query := `
 		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at, type, usdt_received
-		FROM crypto_transactions 
+		FROM crypto_transactions
 		WHERE user_id = ?
 		ORDER BY date DESC
 		LIMIT ?`
@@ -241,7 +386,8 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 	}
 	defer rows.Close()
 
-	var details []models.TransactionDetails
+	var transactions []models.TransactionDetails
+
 	for rows.Next() {
 		var tx models.CryptoTransaction
 		err := rows.Scan(
@@ -262,300 +408,43 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 			return nil, err
 		}
 
-		// Obtener precio actual para cada transacción
-		cryptoData, err := services.GetCryptoPrice(tx.Ticker)
-		if err != nil {
-			log.Printf("Error obteniendo precio para %s: %v", tx.Ticker, err)
-			continue
-		}
-
-		detail := models.TransactionDetails{
+		// Crear detalles de la transacción
+		details := models.TransactionDetails{
 			Transaction: tx,
 		}
 
-		if cryptoData.Raw[tx.Ticker]["USD"].PRICE > 0 {
-			detail.CurrentPrice = cryptoData.Raw[tx.Ticker]["USD"].PRICE
-			detail.CurrentValue = tx.Amount * detail.CurrentPrice
-			detail.GainLoss = detail.CurrentValue - tx.Total
-			detail.GainLossPercent = (detail.GainLoss / tx.Total) * 100
-			details = append(details, detail)
-		}
-	}
-
-	return details, nil
-}
-
-func (r *CryptoRepository) GetPerformance(userID string) (*models.Performance, error) {
-	// Obtener todos los tickers únicos del usuario
-	query := `
-		SELECT DISTINCT ticker
-		FROM crypto_transactions 
-		WHERE user_id = ?`
-
-	rows, err := r.db.Query(query, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tickers []string
-	for rows.Next() {
-		var ticker string
-		if err := rows.Scan(&ticker); err != nil {
-			return nil, err
-		}
-		tickers = append(tickers, ticker)
-	}
-
-	if len(tickers) == 0 {
-		return nil, fmt.Errorf("no se encontraron criptomonedas")
-	}
-
-	performance := &models.Performance{
-		TopGainer: models.PerformanceDetail{ChangePct24h: -100}, // Inicializar con valor mínimo
-		TopLoser:  models.PerformanceDetail{ChangePct24h: 100},  // Inicializar con valor máximo
-	}
-
-	for _, ticker := range tickers {
-		cryptoData, err := services.GetCryptoPrice(ticker)
-		if err != nil {
-			log.Printf("Error obteniendo precio para %s: %v", ticker, err)
-			continue
-		}
-
-		if cryptoData.Raw[ticker]["USD"].PRICE > 0 {
-			changePct := cryptoData.Raw[ticker]["USD"].CHANGEPCT24HOUR
-			priceChange := cryptoData.Raw[ticker]["USD"].CHANGE24HOUR
-
-			// Actualizar top gainer
-			if changePct > performance.TopGainer.ChangePct24h {
-				performance.TopGainer = models.PerformanceDetail{
-					Ticker:       ticker,
-					ChangePct24h: changePct,
-					PriceChange:  priceChange,
-				}
-			}
-
-			// Actualizar top loser
-			if changePct < performance.TopLoser.ChangePct24h {
-				performance.TopLoser = models.PerformanceDetail{
-					Ticker:       ticker,
-					ChangePct24h: changePct,
-					PriceChange:  priceChange,
-				}
-			}
-		}
-	}
-
-	return performance, nil
-}
-
-func (r *CryptoRepository) GetHoldings(userID string) (*models.Holdings, error) {
-	// Consulta para obtener detalles de transacciones por ticker
-	query := `
-		SELECT 
-			ticker,
-			crypto_name,
-			SUM(CASE WHEN type = 'compra' THEN amount ELSE -amount END) as total_amount,
-			SUM(CASE WHEN type = 'compra' THEN total ELSE -total END) as total_invested
-		FROM crypto_transactions 
-		WHERE user_id = ?
-		GROUP BY ticker, crypto_name
-		HAVING total_amount > 0`
-
-	rows, err := r.db.Query(query, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var totalCurrentValue float64
-	var totalInvested float64
-
-	// Slice para almacenar la información de cada criptomoneda
-	var cryptoWeights []models.CryptoWeight
-
-	// Procesar cada ticker
-	for rows.Next() {
-		var ticker, cryptoName string
-		var amount, totalInvestedTicker float64
-		if err := rows.Scan(&ticker, &cryptoName, &amount, &totalInvestedTicker); err != nil {
-			return nil, err
-		}
-
-		// Obtener precio actual
-		cryptoData, err := services.GetCryptoPrice(ticker)
-		if err != nil {
-			log.Printf("Error obteniendo precio para %s: %v", ticker, err)
-			continue
-		}
-
-		if cryptoData.Raw[ticker]["USD"].PRICE > 0 {
-			currentPrice := cryptoData.Raw[ticker]["USD"].PRICE
-			currentValue := amount * currentPrice
-
-			// Agregar a los totales
-			totalCurrentValue += currentValue
-			totalInvested += totalInvestedTicker
-
-			// Guardar información para calcular la distribución
-			cryptoWeights = append(cryptoWeights, models.CryptoWeight{
-				Ticker: ticker,
-				Name:   cryptoName,
-				Value:  currentValue,
-			})
-		}
-	}
-
-	// Calcular porcentajes y profit total
-	totalProfit := totalCurrentValue - totalInvested
-	profitPercentage := 0.0
-	if totalInvested > 0 {
-		profitPercentage = (totalProfit / totalInvested) * 100
-	}
-
-	// Calcular el peso de cada criptomoneda en el portafolio
-	// y ordenar de mayor a menor
-	const othersThreshold = 5.0 // Umbral para agrupar en "OTROS" (porcentaje)
-	var distribution []models.CryptoWeight
-	var othersValue float64
-
-	// Calcular el peso de cada criptomoneda
-	for i := range cryptoWeights {
-		weight := (cryptoWeights[i].Value / totalCurrentValue) * 100
-		cryptoWeights[i].Weight = weight
-	}
-
-	// Ordenar de mayor a menor peso
-	sort.Slice(cryptoWeights, func(i, j int) bool {
-		return cryptoWeights[i].Weight > cryptoWeights[j].Weight
-	})
-
-	// Procesar la distribución final
-	for _, cw := range cryptoWeights {
-		if cw.Weight >= othersThreshold {
-			// Agregar directamente a la distribución
-			distribution = append(distribution, cw)
+		// Si es USDT, el precio actual es siempre 1
+		if tx.Ticker == "USDT" {
+			details.CurrentPrice = 1.0
+			details.CurrentValue = tx.Amount
+			details.GainLoss = 0.0
+			details.GainLossPercent = 0.0
 		} else {
-			// Acumular en "OTROS"
-			othersValue += cw.Value
-		}
-	}
+			// Obtener precio actual para otras criptomonedas
+			cryptoData, err := services.GetCryptoPrice(tx.Ticker)
+			if err == nil {
+				details.CurrentPrice = cryptoData.Raw[tx.Ticker]["USD"].PRICE
+				details.CurrentValue = tx.Amount * details.CurrentPrice
 
-	// Agregar la categoría "OTROS" si hay valores
-	if othersValue > 0 {
-		othersWeight := (othersValue / totalCurrentValue) * 100
-		distribution = append(distribution, models.CryptoWeight{
-			Ticker:   "OTROS",
-			Value:    othersValue,
-			Weight:   othersWeight,
-			IsOthers: true,
-		})
-	}
-
-	// Generar datos para el gráfico de torta
-	pieChartData := models.PieChartData{
-		Currency: "USD",
-	}
-
-	// Colores predefinidos para las criptomonedas más comunes
-	colorMap := map[string]string{
-		"BTC":   "#F7931A", // Naranja Bitcoin
-		"ETH":   "#627EEA", // Azul Ethereum
-		"BNB":   "#F3BA2F", // Amarillo Binance
-		"SOL":   "#14F195", // Verde Solana
-		"ADA":   "#0033AD", // Azul Cardano
-		"XRP":   "#23292F", // Negro Ripple
-		"DOT":   "#E6007A", // Rosa Polkadot
-		"DOGE":  "#C3A634", // Dorado Dogecoin
-		"AVAX":  "#E84142", // Rojo Avalanche
-		"MATIC": "#8247E5", // Púrpura Polygon
-		"OTROS": "#808080", // Gris para "OTROS"
-	}
-
-	// Colores por defecto si no están en el mapa
-	defaultColors := []string{
-		"#FF6384", "#36A2EB", "#FFCE56", "#4BC0C0", "#9966FF",
-		"#FF9F40", "#C9CBCF", "#7CFC00", "#00FFFF", "#FF00FF",
-	}
-
-	colorIndex := 0
-
-	// Generar etiquetas, valores y colores para el gráfico
-	for _, cw := range distribution {
-		pieChartData.Labels = append(pieChartData.Labels, cw.Ticker)
-		pieChartData.Values = append(pieChartData.Values, cw.Weight)
-
-		// Asignar color
-		color, exists := colorMap[cw.Ticker]
-		if !exists {
-			color = defaultColors[colorIndex%len(defaultColors)]
-			colorIndex++
-		}
-		pieChartData.Colors = append(pieChartData.Colors, color)
-
-		// Actualizar el color en la distribución también
-		for i := range distribution {
-			if distribution[i].Ticker == cw.Ticker {
-				distribution[i].Color = color
-				break
+				// Calcular ganancia/pérdida solo para compras
+				if tx.Type == models.TransactionTypeBuy {
+					details.GainLoss = details.CurrentValue - tx.Total
+					if tx.Total > 0 {
+						details.GainLossPercent = (details.GainLoss / tx.Total) * 100
+					}
+				}
 			}
 		}
+
+		transactions = append(transactions, details)
 	}
 
-	return &models.Holdings{
-		TotalCurrentValue: totalCurrentValue,
-		TotalInvested:     totalInvested,
-		TotalProfit:       totalProfit,
-		ProfitPercentage:  profitPercentage,
-		Distribution:      distribution,
-		ChartData:         pieChartData,
-	}, nil
+	// Si no hay transacciones, devolver un slice vacío en lugar de error
+	if len(transactions) == 0 {
+		return []models.TransactionDetails{}, nil
+	}
+
+	return transactions, nil
 }
 
-// UpdateTransaction actualiza una transacción existente
-func (r *CryptoRepository) UpdateTransaction(tx *models.CryptoTransaction) error {
-	query := `
-		UPDATE crypto_transactions 
-		SET crypto_name = ?, ticker = ?, amount = ?, purchase_price = ?, 
-		    total = ?, date = ?, note = ?, type = ?, usdt_received = ?
-		WHERE id = ? AND user_id = ?`
 
-	_, err := r.db.Exec(query,
-		tx.CryptoName,
-		tx.Ticker,
-		tx.Amount,
-		tx.PurchasePrice,
-		tx.Total,
-		tx.Date,
-		tx.Note,
-		tx.Type,
-		tx.USDTReceived,
-		tx.ID,
-		tx.UserID,
-	)
-
-	return err
-}
-
-// DeleteTransaction elimina una transacción
-func (r *CryptoRepository) DeleteTransaction(userID string, transactionID string) error {
-	query := `DELETE FROM crypto_transactions WHERE id = ? AND user_id = ?`
-
-	result, err := r.db.Exec(query, transactionID, userID)
-	if err != nil {
-		return err
-	}
-
-	// Verificar si se eliminó alguna fila
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("no se encontró la transacción o no tienes permiso para eliminarla")
-	}
-
-	return nil
-}

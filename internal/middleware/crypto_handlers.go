@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
@@ -114,7 +113,7 @@ func CreateTransaction(c *gin.Context) {
 		tx.Date = time.Now()
 	}
 
-	if err := cryptoRepo.CreateTransaction(&tx); err != nil {
+	if err := cryptoRepo.CreateTransaction(tx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al crear la transacción: %v", err)})
 		return
 	}
@@ -135,7 +134,7 @@ func CreateTransaction(c *gin.Context) {
 			Note:          fmt.Sprintf("Compra automática de USDT por venta de %s", tx.Ticker),
 		}
 
-		if err := cryptoRepo.CreateTransaction(&usdtTx); err != nil {
+		if err := cryptoRepo.CreateTransaction(usdtTx); err != nil {
 			// Solo registrar el error, no detener el flujo
 			log.Printf("Error al crear la transacción automática de USDT: %v", err)
 		}
@@ -231,97 +230,14 @@ func GetPerformance(c *gin.Context) {
 func GetHoldings(c *gin.Context) {
 	userID := c.GetString("userId")
 
-	// Primero obtenemos el dashboard que ya tiene la información de todas las criptomonedas
-	dashboard, err := cryptoRepo.GetCryptoDashboard(userID)
+	// Crear un repositorio de tenencias
+	holdingsRepo := repository.NewHoldingsRepository(database.DB)
+
+	// Obtener las tenencias
+	holdings, err := holdingsRepo.GetHoldings(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener el dashboard"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener las tenencias"})
 		return
-	}
-
-	// Calcular totales y preparar datos para el gráfico de torta
-	var totalCurrentValue float64
-	var totalInvested float64
-	var cryptoWeights []models.CryptoWeight
-
-	// Procesar cada criptomoneda del dashboard
-	for _, crypto := range dashboard {
-		totalCurrentValue += crypto.Holdings * crypto.CurrentPrice
-		totalInvested += crypto.TotalInvested
-
-		// Usar el ticker como nombre si no hay un nombre específico
-		name := crypto.Ticker
-
-		// Guardar información para calcular la distribución
-		cryptoWeights = append(cryptoWeights, models.CryptoWeight{
-			Ticker: crypto.Ticker,
-			Name:   name,
-			Value:  crypto.TotalInvested,
-		})
-	}
-
-	// Umbral para agrupar en "OTROS" (porcentaje)
-	const othersThreshold = 5.0
-
-	// Calcular el peso de cada criptomoneda
-	for i := range cryptoWeights {
-		weight := (cryptoWeights[i].Value / totalInvested) * 100
-		cryptoWeights[i].Weight = weight
-	}
-
-	// Ordenar de mayor a menor peso
-	sort.Slice(cryptoWeights, func(i, j int) bool {
-		return cryptoWeights[i].Weight > cryptoWeights[j].Weight
-	})
-
-	// Procesar la distribución final
-	var distribution []models.CryptoWeight
-	var othersValue float64
-	var othersDetails []models.CryptoWeight
-
-	for _, cw := range cryptoWeights {
-		if cw.Weight >= othersThreshold {
-			// Agregar directamente a la distribución
-			distribution = append(distribution, cw)
-		} else {
-			// Acumular en "OTROS"
-			othersValue += cw.Value
-			// Guardar detalles de criptomonedas menores
-			othersDetails = append(othersDetails, cw)
-		}
-	}
-
-	// Agregar la categoría "OTROS" si hay valores
-	if othersValue > 0 {
-		othersWeight := (othersValue / totalInvested) * 100
-		othersCryptoWeight := models.CryptoWeight{
-			Ticker:       "OTROS",
-			Name:         "Otras Criptomonedas",
-			Value:        othersValue,
-			Weight:       othersWeight,
-			IsOthers:     true,
-			OthersDetail: othersDetails, // Incluir detalles de criptomonedas menores
-		}
-		distribution = append(distribution, othersCryptoWeight)
-	}
-
-	// Generar datos para el gráfico de torta
-	pieChartData := models.PieChartData{
-		Currency: "USD",
-	}
-
-	// Generar etiquetas y valores para el gráfico
-	for _, cw := range distribution {
-		pieChartData.Labels = append(pieChartData.Labels, cw.Ticker)
-		pieChartData.Values = append(pieChartData.Values, cw.Weight)
-	}
-
-	holdings := &models.Holdings{
-		TotalCurrentValue: totalCurrentValue,
-		TotalInvested:     totalInvested,
-		TotalProfit:       totalCurrentValue - totalInvested,
-		ProfitPercentage:  ((totalCurrentValue - totalInvested) / totalInvested) * 100,
-		Distribution:      distribution,
-		ChartData:         pieChartData,
 	}
 
 	c.JSON(http.StatusOK, holdings)
@@ -330,7 +246,11 @@ func GetHoldings(c *gin.Context) {
 func GetCurrentBalance(c *gin.Context) {
 	userID := c.GetString("userId")
 
-	holdings, err := cryptoRepo.GetHoldings(userID)
+	// Crear un repositorio de tenencias
+	holdingsRepo := repository.NewHoldingsRepository(database.DB)
+
+	// Obtener las tenencias
+	holdings, err := holdingsRepo.GetHoldings(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener el balance actual"})
 		return
@@ -429,7 +349,7 @@ func UpdateTransaction(c *gin.Context) {
 		tx.Date = time.Now()
 	}
 
-	if err := cryptoRepo.UpdateTransaction(&tx); err != nil {
+	if err := cryptoRepo.UpdateTransaction(tx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al actualizar la transacción: %v", err)})
 		return
 	}
