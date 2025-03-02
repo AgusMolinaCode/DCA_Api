@@ -50,27 +50,11 @@ func InitDB() error {
 		date DATETIME NOT NULL,
 		note TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		type TEXT DEFAULT 'compra',
+		usdt_received REAL DEFAULT 0,
 		FOREIGN KEY(user_id) REFERENCES users(id)
 	);`
 
 	_, err = DB.Exec(createCryptoTableSQL)
-	if err != nil {
-		return err
-	}
-
-	// Crear tabla de historial del portafolio
-	createPortfolioHistorySQL := `
-	CREATE TABLE IF NOT EXISTS portfolio_history (
-		id TEXT PRIMARY KEY,
-		user_id TEXT NOT NULL,
-		total_value REAL NOT NULL,
-		total_invested REAL NOT NULL,
-		profit REAL NOT NULL,
-		profit_percentage REAL NOT NULL,
-		timestamp DATETIME NOT NULL,
-		FOREIGN KEY(user_id) REFERENCES users(id)
-	);`
-
-	_, err = DB.Exec(createPortfolioHistorySQL)
 	return err
 }

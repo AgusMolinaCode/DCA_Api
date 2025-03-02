@@ -24,9 +24,12 @@ func RegisterRoutes(router *gin.Engine) {
 	{
 		protected.PUT("/users", middleware.UpdateUser)
 		protected.DELETE("/users", middleware.DeleteUser)
+
 		protected.POST("/transactions", middleware.CreateTransaction)
 		protected.GET("/transactions", middleware.GetUserTransactions)
 		protected.GET("/transactions/:id", middleware.GetTransactionDetails)
+		protected.PUT("/transactions/:id", middleware.UpdateTransaction)
+		protected.DELETE("/transactions/:id", middleware.DeleteTransaction)
 		protected.GET("/recent-transactions", middleware.GetRecentTransactions)
 		protected.GET("/dashboard", middleware.GetDashboard)
 		protected.GET("/performance", middleware.GetPerformance)

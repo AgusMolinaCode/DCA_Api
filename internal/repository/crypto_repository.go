@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sort"
 
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/models"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/services"
@@ -19,8 +20,8 @@ func NewCryptoRepository(db *sql.DB) *CryptoRepository {
 
 func (r *CryptoRepository) CreateTransaction(tx *models.CryptoTransaction) error {
 	query := `
-		INSERT INTO crypto_transactions (id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		INSERT INTO crypto_transactions (id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, type, usdt_received)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := r.db.Exec(query,
 		tx.ID,
@@ -32,13 +33,45 @@ func (r *CryptoRepository) CreateTransaction(tx *models.CryptoTransaction) error
 		tx.Total,
 		tx.Date,
 		tx.Note,
+		tx.Type,
+		tx.USDTReceived,
 	)
+
+	// Si es una venta, actualizar las tenencias
+	if tx.Type == models.TransactionTypeSell {
+		err = r.UpdateHoldingsAfterSale(tx)
+		if err != nil {
+			return fmt.Errorf("error al actualizar holdings después de la venta: %v", err)
+		}
+	}
+
 	return err
+}
+
+func (r *CryptoRepository) UpdateHoldingsAfterSale(tx *models.CryptoTransaction) error {
+	// Verificar que el usuario tenga suficiente cantidad para vender
+	query := `
+		SELECT SUM(amount) as total_amount
+		FROM crypto_transactions 
+		WHERE user_id = ? AND ticker = ?`
+
+	var totalAmount float64
+	err := r.db.QueryRow(query, tx.UserID, tx.Ticker).Scan(&totalAmount)
+	if err != nil {
+		return err
+	}
+
+	// Si la cantidad a vender es mayor que la disponible, retornar error
+	if tx.Amount > totalAmount {
+		return fmt.Errorf("cantidad insuficiente para vender: disponible %.8f, solicitado %.8f", totalAmount, tx.Amount)
+	}
+
+	return nil
 }
 
 func (r *CryptoRepository) GetUserTransactions(userID string) ([]models.CryptoTransaction, error) {
 	query := `
-		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at 
+		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at, type, usdt_received
 		FROM crypto_transactions 
 		WHERE user_id = ?
 		ORDER BY date DESC`
@@ -63,6 +96,8 @@ func (r *CryptoRepository) GetUserTransactions(userID string) ([]models.CryptoTr
 			&tx.Date,
 			&tx.Note,
 			&tx.CreatedAt,
+			&tx.Type,
+			&tx.USDTReceived,
 		)
 		if err != nil {
 			return nil, err
@@ -76,12 +111,14 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 	query := `
 		SELECT 
 			ticker,
-			SUM(amount) as holdings,
-			SUM(total) as total_invested,
-			SUM(total)/SUM(amount) as avg_price
+			SUM(CASE WHEN type = 'compra' THEN amount ELSE -amount END) as holdings,
+			SUM(CASE WHEN type = 'compra' THEN total ELSE -total END) as total_invested,
+			(SUM(CASE WHEN type = 'compra' THEN total ELSE 0 END) / 
+			 SUM(CASE WHEN type = 'compra' THEN amount ELSE 0 END)) as avg_price
 		FROM crypto_transactions 
 		WHERE user_id = ?
-		GROUP BY ticker`
+		GROUP BY ticker
+		HAVING holdings > 0`
 
 	rows, err := r.db.Query(query, userID)
 	if err != nil {
@@ -106,7 +143,19 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 
 		log.Printf("Procesando ticker: %s", d.Ticker)
 
-		// Obtener precio actual
+		// Caso especial para USDT: total_invested debe ser igual a holdings
+		if d.Ticker == "USDT" {
+			d.TotalInvested = d.Holdings
+			d.AvgPrice = 1.0
+			d.CurrentPrice = 1.0
+			d.CurrentProfit = 0.0
+			d.ProfitPercent = 0.0
+			dashboards = append(dashboards, d)
+			log.Printf("USDT procesado con valores ajustados: holdings=%f, total_invested=%f", d.Holdings, d.TotalInvested)
+			continue
+		}
+
+		// Obtener precio actual para otras criptomonedas
 		cryptoData, err := services.GetCryptoPrice(d.Ticker)
 		if err != nil {
 			log.Printf("Error obteniendo precio para %s: %v", d.Ticker, err)
@@ -135,7 +184,7 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 
 func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID string) (*models.TransactionDetails, error) {
 	query := `
-		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at 
+		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at, type, usdt_received
 		FROM crypto_transactions 
 		WHERE user_id = ? AND id = ?`
 
@@ -151,6 +200,8 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 		&tx.Date,
 		&tx.Note,
 		&tx.CreatedAt,
+		&tx.Type,
+		&tx.USDTReceived,
 	)
 	if err != nil {
 		return nil, err
@@ -178,7 +229,7 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 
 func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]models.TransactionDetails, error) {
 	query := `
-		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at 
+		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at, type, usdt_received
 		FROM crypto_transactions 
 		WHERE user_id = ?
 		ORDER BY date DESC
@@ -204,6 +255,8 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 			&tx.Date,
 			&tx.Note,
 			&tx.CreatedAt,
+			&tx.Type,
+			&tx.USDTReceived,
 		)
 		if err != nil {
 			return nil, err
@@ -302,11 +355,13 @@ func (r *CryptoRepository) GetHoldings(userID string) (*models.Holdings, error) 
 	query := `
 		SELECT 
 			ticker,
-			SUM(amount) as total_amount,
-			SUM(total) as total_invested
+			crypto_name,
+			SUM(CASE WHEN type = 'compra' THEN amount ELSE -amount END) as total_amount,
+			SUM(CASE WHEN type = 'compra' THEN total ELSE -total END) as total_invested
 		FROM crypto_transactions 
 		WHERE user_id = ?
-		GROUP BY ticker`
+		GROUP BY ticker, crypto_name
+		HAVING total_amount > 0`
 
 	rows, err := r.db.Query(query, userID)
 	if err != nil {
@@ -317,11 +372,14 @@ func (r *CryptoRepository) GetHoldings(userID string) (*models.Holdings, error) 
 	var totalCurrentValue float64
 	var totalInvested float64
 
+	// Slice para almacenar la información de cada criptomoneda
+	var cryptoWeights []models.CryptoWeight
+
 	// Procesar cada ticker
 	for rows.Next() {
-		var ticker string
+		var ticker, cryptoName string
 		var amount, totalInvestedTicker float64
-		if err := rows.Scan(&ticker, &amount, &totalInvestedTicker); err != nil {
+		if err := rows.Scan(&ticker, &cryptoName, &amount, &totalInvestedTicker); err != nil {
 			return nil, err
 		}
 
@@ -336,19 +394,168 @@ func (r *CryptoRepository) GetHoldings(userID string) (*models.Holdings, error) 
 			currentPrice := cryptoData.Raw[ticker]["USD"].PRICE
 			currentValue := amount * currentPrice
 
+			// Agregar a los totales
 			totalCurrentValue += currentValue
 			totalInvested += totalInvestedTicker
+
+			// Guardar información para calcular la distribución
+			cryptoWeights = append(cryptoWeights, models.CryptoWeight{
+				Ticker: ticker,
+				Name:   cryptoName,
+				Value:  currentValue,
+			})
 		}
 	}
 
 	// Calcular porcentajes y profit total
 	totalProfit := totalCurrentValue - totalInvested
-	profitPercentage := (totalProfit / totalInvested) * 100
+	profitPercentage := 0.0
+	if totalInvested > 0 {
+		profitPercentage = (totalProfit / totalInvested) * 100
+	}
+
+	// Calcular el peso de cada criptomoneda en el portafolio
+	// y ordenar de mayor a menor
+	const othersThreshold = 5.0 // Umbral para agrupar en "OTROS" (porcentaje)
+	var distribution []models.CryptoWeight
+	var othersValue float64
+
+	// Calcular el peso de cada criptomoneda
+	for i := range cryptoWeights {
+		weight := (cryptoWeights[i].Value / totalCurrentValue) * 100
+		cryptoWeights[i].Weight = weight
+	}
+
+	// Ordenar de mayor a menor peso
+	sort.Slice(cryptoWeights, func(i, j int) bool {
+		return cryptoWeights[i].Weight > cryptoWeights[j].Weight
+	})
+
+	// Procesar la distribución final
+	for _, cw := range cryptoWeights {
+		if cw.Weight >= othersThreshold {
+			// Agregar directamente a la distribución
+			distribution = append(distribution, cw)
+		} else {
+			// Acumular en "OTROS"
+			othersValue += cw.Value
+		}
+	}
+
+	// Agregar la categoría "OTROS" si hay valores
+	if othersValue > 0 {
+		othersWeight := (othersValue / totalCurrentValue) * 100
+		distribution = append(distribution, models.CryptoWeight{
+			Ticker:   "OTROS",
+			Value:    othersValue,
+			Weight:   othersWeight,
+			IsOthers: true,
+		})
+	}
+
+	// Generar datos para el gráfico de torta
+	pieChartData := models.PieChartData{
+		Currency: "USD",
+	}
+
+	// Colores predefinidos para las criptomonedas más comunes
+	colorMap := map[string]string{
+		"BTC":   "#F7931A", // Naranja Bitcoin
+		"ETH":   "#627EEA", // Azul Ethereum
+		"BNB":   "#F3BA2F", // Amarillo Binance
+		"SOL":   "#14F195", // Verde Solana
+		"ADA":   "#0033AD", // Azul Cardano
+		"XRP":   "#23292F", // Negro Ripple
+		"DOT":   "#E6007A", // Rosa Polkadot
+		"DOGE":  "#C3A634", // Dorado Dogecoin
+		"AVAX":  "#E84142", // Rojo Avalanche
+		"MATIC": "#8247E5", // Púrpura Polygon
+		"OTROS": "#808080", // Gris para "OTROS"
+	}
+
+	// Colores por defecto si no están en el mapa
+	defaultColors := []string{
+		"#FF6384", "#36A2EB", "#FFCE56", "#4BC0C0", "#9966FF",
+		"#FF9F40", "#C9CBCF", "#7CFC00", "#00FFFF", "#FF00FF",
+	}
+
+	colorIndex := 0
+
+	// Generar etiquetas, valores y colores para el gráfico
+	for _, cw := range distribution {
+		pieChartData.Labels = append(pieChartData.Labels, cw.Ticker)
+		pieChartData.Values = append(pieChartData.Values, cw.Weight)
+
+		// Asignar color
+		color, exists := colorMap[cw.Ticker]
+		if !exists {
+			color = defaultColors[colorIndex%len(defaultColors)]
+			colorIndex++
+		}
+		pieChartData.Colors = append(pieChartData.Colors, color)
+
+		// Actualizar el color en la distribución también
+		for i := range distribution {
+			if distribution[i].Ticker == cw.Ticker {
+				distribution[i].Color = color
+				break
+			}
+		}
+	}
 
 	return &models.Holdings{
 		TotalCurrentValue: totalCurrentValue,
 		TotalInvested:     totalInvested,
 		TotalProfit:       totalProfit,
 		ProfitPercentage:  profitPercentage,
+		Distribution:      distribution,
+		ChartData:         pieChartData,
 	}, nil
+}
+
+// UpdateTransaction actualiza una transacción existente
+func (r *CryptoRepository) UpdateTransaction(tx *models.CryptoTransaction) error {
+	query := `
+		UPDATE crypto_transactions 
+		SET crypto_name = ?, ticker = ?, amount = ?, purchase_price = ?, 
+		    total = ?, date = ?, note = ?, type = ?, usdt_received = ?
+		WHERE id = ? AND user_id = ?`
+
+	_, err := r.db.Exec(query,
+		tx.CryptoName,
+		tx.Ticker,
+		tx.Amount,
+		tx.PurchasePrice,
+		tx.Total,
+		tx.Date,
+		tx.Note,
+		tx.Type,
+		tx.USDTReceived,
+		tx.ID,
+		tx.UserID,
+	)
+
+	return err
+}
+
+// DeleteTransaction elimina una transacción
+func (r *CryptoRepository) DeleteTransaction(userID string, transactionID string) error {
+	query := `DELETE FROM crypto_transactions WHERE id = ? AND user_id = ?`
+
+	result, err := r.db.Exec(query, transactionID, userID)
+	if err != nil {
+		return err
+	}
+
+	// Verificar si se eliminó alguna fila
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no se encontró la transacción o no tienes permiso para eliminarla")
+	}
+
+	return nil
 }
