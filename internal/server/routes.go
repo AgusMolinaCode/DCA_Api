@@ -18,6 +18,15 @@ func RegisterRoutes(router *gin.Engine) {
 
 	router.POST("/signup", middleware.Signup)
 	router.POST("/login", middleware.Login)
+
+	// Configurar ruta de logout con opciones
+	router.OPTIONS("/logout", func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
+		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Status(200)
+	})
 	router.POST("/logout", middleware.AuthMiddleware(), middleware.Logout)
 
 	protected := router.Group("/")

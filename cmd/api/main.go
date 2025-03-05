@@ -26,6 +26,8 @@ func main() {
 	config.AllowOrigins = []string{"http://localhost:3000"}
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+	config.AllowCredentials = true
+	config.ExposeHeaders = []string{"Content-Length"}
 	router.Use(cors.New(config))
 
 	// Configurar las rutas

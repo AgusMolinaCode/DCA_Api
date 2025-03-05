@@ -239,6 +239,10 @@ func Logout(c *gin.Context) {
 	// Limpiar tokens expirados
 	go cleanupRevokedTokens()
 
+	// Establecer encabezados para CORS
+	c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
+	c.Header("Access-Control-Allow-Credentials", "true")
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Sesión cerrada exitosamente",
 	})
