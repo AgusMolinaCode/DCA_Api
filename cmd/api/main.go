@@ -7,6 +7,7 @@ import (
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/database"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/middleware"
 	routes "github.com/AgusMolinaCode/DCA_Api.git/internal/server"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
@@ -19,6 +20,13 @@ func main() {
 
 	// Crear el router de Gin
 	router := gin.Default()
+
+	// Configurar CORS
+	config := cors.DefaultConfig()
+	config.AllowOrigins = []string{"http://localhost:3000"}
+	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+	router.Use(cors.New(config))
 
 	// Configurar las rutas
 	routes.RegisterRoutes(router)

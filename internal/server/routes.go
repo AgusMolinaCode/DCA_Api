@@ -18,6 +18,7 @@ func RegisterRoutes(router *gin.Engine) {
 
 	router.POST("/signup", middleware.Signup)
 	router.POST("/login", middleware.Login)
+	router.POST("/logout", middleware.AuthMiddleware(), middleware.Logout)
 
 	protected := router.Group("/")
 	protected.Use(middleware.AuthMiddleware())
@@ -43,6 +44,8 @@ func RegisterRoutes(router *gin.Engine) {
 	{
 		admin.GET("/users", middleware.GetUsers)
 		admin.GET("/users/:id", middleware.GetUser)
+		admin.DELETE("/users/:id", middleware.DeleteUserByAdmin)
+		admin.GET("/users/email/:email", middleware.GetUserByEmail)
 	}
 
 	router.POST("/request-reset-password", middleware.RequestResetPassword)

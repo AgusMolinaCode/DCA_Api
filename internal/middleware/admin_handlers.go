@@ -32,6 +32,27 @@ func GetUser(c *gin.Context) {
 	})
 }
 
+func DeleteUserByAdmin(c *gin.Context) {
+	userId := c.Param("id")
+
+	// Verificar que el usuario exista
+	_, err := userRepo.GetUserById(userId)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Usuario no encontrado"})
+		return
+	}
+
+	// Eliminar el usuario
+	if err := userRepo.DeleteUser(userId); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al eliminar usuario"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Usuario eliminado exitosamente",
+	})
+}
+
 func GetUserByEmail(c *gin.Context) {
 	email := c.Param("email")
 

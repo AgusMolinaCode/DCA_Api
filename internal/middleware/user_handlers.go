@@ -40,6 +40,8 @@ func DeleteUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Usuario eliminado"})
 }
 
+
+
 func RequestResetPassword(c *gin.Context) {
 	var request struct {
 		Email string `json:"email" binding:"required,email"`

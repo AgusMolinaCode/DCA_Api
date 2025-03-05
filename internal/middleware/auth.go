@@ -31,10 +31,37 @@ var (
 
 var userRepo *repository.UserRepository
 
+// Estructura para almacenar tokens revocados
+var (
+	revokedTokens = make(map[string]time.Time)
+	tokenMutex    sync.RWMutex
+)
+
 func InitAuth() {
 	userRepo = repository.NewUserRepository()
 }
 
+// Función para revocar un token
+func revokeToken(token string) {
+	tokenMutex.Lock()
+	defer tokenMutex.Unlock()
+	revokedTokens[token] = time.Now()
+}
+
+// Función para limpiar tokens expirados
+func cleanupRevokedTokens() {
+	tokenMutex.Lock()
+	defer tokenMutex.Unlock()
+	now := time.Now()
+	for token, revokedAt := range revokedTokens {
+		// Eliminar tokens revocados hace más de 24 horas
+		if now.Sub(revokedAt) > 24*time.Hour {
+			delete(revokedTokens, token)
+		}
+	}
+}
+
+// Modificar el middleware de autenticación para verificar tokens revocados
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -45,6 +72,18 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+
+		// Verificar si el token está revocado
+		tokenMutex.RLock()
+		_, isRevoked := revokedTokens[tokenString]
+		tokenMutex.RUnlock()
+
+		if isRevoked {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido o revocado"})
+			c.Abort()
+			return
+		}
+
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			return []byte(os.Getenv("JWT_SECRET")), nil
 		})
@@ -182,4 +221,25 @@ func Signup(c *gin.Context) {
 // Función auxiliar para generar IDs de usuario
 func generateUserId() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// Nueva función de logout
+func Logout(c *gin.Context) {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Token no proporcionado"})
+		return
+	}
+
+	tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+
+	// Revocar el token
+	revokeToken(tokenString)
+
+	// Limpiar tokens expirados
+	go cleanupRevokedTokens()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Sesión cerrada exitosamente",
+	})
 }
