@@ -103,7 +103,7 @@ func AuthMiddleware() gin.HandlerFunc {
 func GenerateToken(userId string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"userId": userId,
-		"exp":    time.Now().Add(time.Hour * 24).Unix(),
+		"exp":    time.Now().Add(time.Hour * 1).Unix(),
 	})
 
 	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
