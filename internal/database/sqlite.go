@@ -52,6 +52,7 @@ func InitDB() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		type TEXT DEFAULT 'compra',
 		usdt_received REAL DEFAULT 0,
+		image_url TEXT,
 		FOREIGN KEY(user_id) REFERENCES users(id)
 	);`
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/models"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/services"
@@ -24,9 +25,14 @@ func NewCryptoRepository(db *sql.DB) *CryptoRepository {
 	}
 }
 
+// Función para generar un ID único para transacciones
+func generateTransactionId() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
 // CreateTransaction crea una nueva transacción de criptomoneda
 func (r *CryptoRepository) CreateTransaction(transaction models.CryptoTransaction) error {
-	// Iniciar una transacción SQL
+	// Iniciar transacción SQL
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -39,13 +45,52 @@ func (r *CryptoRepository) CreateTransaction(transaction models.CryptoTransactio
 		err = tx.Commit()
 	}()
 
-	// Insertar la transacción
+	// Generar ID único para la transacción
+	transaction.ID = generateTransactionId()
+
+	// Si es una venta, verificar si el usuario tiene suficiente saldo
+	if transaction.Type == models.TransactionTypeSell {
+		err = r.holdingsRepo.UpdateHoldingsAfterSale(tx, transaction.UserID, transaction.Ticker, transaction.Amount)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Insertar la transacción en la base de datos
 	query := `
 		INSERT INTO crypto_transactions (
 			id, user_id, crypto_name, ticker, amount, purchase_price, 
-			total, date, note, created_at, type, usdt_received
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			total, date, note, created_at, type, usdt_received, image_url
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
+
+	// Si la fecha está vacía, usar la fecha actual
+	if transaction.Date.IsZero() {
+		transaction.Date = time.Now()
+	}
+
+	// Si el tipo está vacío, establecer como compra por defecto
+	if transaction.Type == "" {
+		transaction.Type = models.TransactionTypeBuy
+	}
+
+	// Si no se especificó el precio, obtener precio actual
+	if transaction.PurchasePrice <= 0 {
+		cryptoData, err := services.GetCryptoPrice(transaction.Ticker)
+		if err != nil {
+			return fmt.Errorf("error al obtener precio de %s: %v", transaction.Ticker, err)
+		}
+		// Usar el precio actual de la API
+		transaction.PurchasePrice = cryptoData.Raw[transaction.Ticker]["USD"].PRICE
+	}
+
+	// Calcular el total si no se especificó
+	if transaction.Total <= 0 {
+		transaction.Total = transaction.Amount * transaction.PurchasePrice
+	}
+
+	// Establecer la fecha de creación
+	transaction.CreatedAt = time.Now()
 
 	_, err = tx.Exec(
 		query,
@@ -61,56 +106,52 @@ func (r *CryptoRepository) CreateTransaction(transaction models.CryptoTransactio
 		transaction.CreatedAt,
 		transaction.Type,
 		transaction.USDTReceived,
+		transaction.ImageURL,
 	)
+
 	if err != nil {
 		return err
 	}
 
-	// Si es una venta, verificar si hay suficiente criptomoneda para vender
-	if transaction.Type == models.TransactionTypeSell {
-		err = r.holdingsRepo.UpdateHoldingsAfterSale(tx, transaction.UserID, transaction.Ticker, transaction.Amount)
-		if err != nil {
-			return err
+	// Si es una venta y se recibió USDT, crear automáticamente una transacción de compra de USDT
+	if transaction.Type == models.TransactionTypeSell && transaction.USDTReceived > 0 {
+		usdtTransaction := models.CryptoTransaction{
+			UserID:        transaction.UserID,
+			CryptoName:    "Tether",
+			Ticker:        "USDT",
+			Amount:        transaction.USDTReceived,
+			PurchasePrice: 1.0, // USDT está anclado a 1 USD
+			Total:         transaction.USDTReceived,
+			Date:          transaction.Date,
+			Note:          fmt.Sprintf("Compra automática de USDT por venta de %s", transaction.Ticker),
+			Type:          models.TransactionTypeBuy,
 		}
 
-		// Si se recibió USDT, crear una transacción de compra de USDT
-		if transaction.USDTReceived > 0 {
-			// Crear una nueva transacción para la compra de USDT
-			usdtTransaction := models.CryptoTransaction{
-				ID:            fmt.Sprintf("%s-usdt", transaction.ID),
-				UserID:        transaction.UserID,
-				CryptoName:    "Tether",
-				Ticker:        "USDT",
-				Amount:        transaction.USDTReceived,
-				PurchasePrice: 1.0, // USDT está anclado a 1 USD
-				Total:         transaction.USDTReceived,
-				Date:          transaction.Date,
-				Note:          fmt.Sprintf("Compra automática de USDT por venta de %s", transaction.Ticker),
-				CreatedAt:     transaction.CreatedAt,
-				Type:          models.TransactionTypeBuy,
-				USDTReceived:  0,
-			}
+		// Generar ID único para la transacción de USDT
+		usdtTransaction.ID = generateTransactionId()
+		usdtTransaction.CreatedAt = time.Now()
 
-			// Insertar la transacción de USDT
-			_, err = tx.Exec(
-				query,
-				usdtTransaction.ID,
-				usdtTransaction.UserID,
-				usdtTransaction.CryptoName,
-				usdtTransaction.Ticker,
-				usdtTransaction.Amount,
-				usdtTransaction.PurchasePrice,
-				usdtTransaction.Total,
-				usdtTransaction.Date,
-				usdtTransaction.Note,
-				usdtTransaction.CreatedAt,
-				usdtTransaction.Type,
-				usdtTransaction.USDTReceived,
-			)
-			if err != nil {
-				// Loguear el error pero no detener el flujo
-				log.Printf("Error al crear transacción de USDT: %v", err)
-			}
+		// Insertar la transacción de USDT
+		_, err = tx.Exec(
+			query,
+			usdtTransaction.ID,
+			usdtTransaction.UserID,
+			usdtTransaction.CryptoName,
+			usdtTransaction.Ticker,
+			usdtTransaction.Amount,
+			usdtTransaction.PurchasePrice,
+			usdtTransaction.Total,
+			usdtTransaction.Date,
+			usdtTransaction.Note,
+			usdtTransaction.CreatedAt,
+			usdtTransaction.Type,
+			0,  // No hay USDT recibido en una compra
+			"", // No hay imagen URL para la transacción automática
+		)
+
+		if err != nil {
+			// Loguear el error pero no interrumpir el flujo principal
+			log.Printf("Error al crear transacción automática de USDT: %v", err)
 		}
 	}
 
@@ -119,26 +160,47 @@ func (r *CryptoRepository) CreateTransaction(transaction models.CryptoTransactio
 
 // UpdateTransaction actualiza una transacción existente
 func (r *CryptoRepository) UpdateTransaction(transaction models.CryptoTransaction) error {
-	// Verificar que la transacción pertenezca al usuario
-	var count int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM crypto_transactions WHERE id = ? AND user_id = ?",
-		transaction.ID, transaction.UserID).Scan(&count)
+	// Verificar que la transacción exista y pertenezca al usuario
+	var existingUserId string
+	err := r.db.QueryRow("SELECT user_id FROM crypto_transactions WHERE id = ?", transaction.ID).Scan(&existingUserId)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("transacción no encontrada")
+		}
+		return err
+	}
+
+	if existingUserId != transaction.UserID {
+		return fmt.Errorf("no tienes permiso para modificar esta transacción")
+	}
+
+	// Iniciar transacción SQL
+	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
-	if count == 0 {
-		return errors.New("transacción no encontrada o no tienes permiso para modificarla")
-	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
 
 	// Actualizar la transacción
 	query := `
-		UPDATE crypto_transactions
+		UPDATE crypto_transactions 
 		SET crypto_name = ?, ticker = ?, amount = ?, purchase_price = ?, 
-			total = ?, date = ?, note = ?, type = ?, usdt_received = ?
+			total = ?, date = ?, note = ?, type = ?, usdt_received = ?, image_url = ?
 		WHERE id = ? AND user_id = ?
 	`
 
-	_, err = r.db.Exec(
+	// Calcular el total si no se especificó
+	if transaction.Total <= 0 {
+		transaction.Total = transaction.Amount * transaction.PurchasePrice
+	}
+
+	_, err = tx.Exec(
 		query,
 		transaction.CryptoName,
 		transaction.Ticker,
@@ -149,9 +211,11 @@ func (r *CryptoRepository) UpdateTransaction(transaction models.CryptoTransactio
 		transaction.Note,
 		transaction.Type,
 		transaction.USDTReceived,
+		transaction.ImageURL,
 		transaction.ID,
 		transaction.UserID,
 	)
+
 	return err
 }
 
@@ -176,10 +240,12 @@ func (r *CryptoRepository) DeleteTransaction(userID, transactionID string) error
 
 func (r *CryptoRepository) GetUserTransactions(userID string) ([]models.CryptoTransaction, error) {
 	query := `
-		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at, type, usdt_received
+		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, 
+			   total, date, note, created_at, type, usdt_received, image_url
 		FROM crypto_transactions 
-		WHERE user_id = ?
-		ORDER BY date DESC`
+		WHERE user_id = ? 
+		ORDER BY date DESC
+	`
 
 	rows, err := r.db.Query(query, userID)
 	if err != nil {
@@ -203,12 +269,18 @@ func (r *CryptoRepository) GetUserTransactions(userID string) ([]models.CryptoTr
 			&tx.CreatedAt,
 			&tx.Type,
 			&tx.USDTReceived,
+			&tx.ImageURL,
 		)
 		if err != nil {
 			return nil, err
 		}
 		transactions = append(transactions, tx)
 	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return transactions, nil
 }
 
@@ -329,12 +401,14 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 
 func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID string) (*models.TransactionDetails, error) {
 	query := `
-		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at, type, usdt_received
+		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, 
+			   total, date, note, created_at, type, usdt_received, image_url
 		FROM crypto_transactions 
-		WHERE user_id = ? AND id = ?`
+		WHERE id = ? AND user_id = ?
+	`
 
 	var tx models.CryptoTransaction
-	err := r.db.QueryRow(query, userID, transactionID).Scan(
+	err := r.db.QueryRow(query, transactionID, userID).Scan(
 		&tx.ID,
 		&tx.UserID,
 		&tx.CryptoName,
@@ -347,38 +421,64 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 		&tx.CreatedAt,
 		&tx.Type,
 		&tx.USDTReceived,
+		&tx.ImageURL,
 	)
+
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("transacción no encontrada")
+		}
 		return nil, err
 	}
 
-	// Obtener precio actual
+	// Obtener el precio actual de la criptomoneda
 	cryptoData, err := services.GetCryptoPrice(tx.Ticker)
 	if err != nil {
-		return nil, err
+		// Si no podemos obtener el precio actual, usamos el precio de compra
+		log.Printf("Error al obtener precio actual de %s: %v", tx.Ticker, err)
+
+		details := &models.TransactionDetails{
+			Transaction:     tx,
+			CurrentPrice:    tx.PurchasePrice,
+			CurrentValue:    tx.Amount * tx.PurchasePrice,
+			GainLoss:        0,
+			GainLossPercent: 0,
+		}
+		return details, nil
+	}
+
+	currentPrice := cryptoData.Raw[tx.Ticker]["USD"].PRICE
+	currentValue := tx.Amount * currentPrice
+	gainLoss := currentValue - tx.Total
+	gainLossPercent := 0.0
+	if tx.Total > 0 {
+		gainLossPercent = (gainLoss / tx.Total) * 100
 	}
 
 	details := &models.TransactionDetails{
-		Transaction: tx,
-	}
-
-	if cryptoData.Raw[tx.Ticker]["USD"].PRICE > 0 {
-		details.CurrentPrice = cryptoData.Raw[tx.Ticker]["USD"].PRICE
-		details.CurrentValue = tx.Amount * details.CurrentPrice
-		details.GainLoss = details.CurrentValue - tx.Total
-		details.GainLossPercent = (details.GainLoss / tx.Total) * 100
+		Transaction:     tx,
+		CurrentPrice:    currentPrice,
+		CurrentValue:    currentValue,
+		GainLoss:        gainLoss,
+		GainLossPercent: gainLossPercent,
 	}
 
 	return details, nil
 }
 
 func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]models.TransactionDetails, error) {
+	if limit <= 0 {
+		limit = 5 // Valor predeterminado
+	}
+
 	query := `
-		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note, created_at, type, usdt_received
-		FROM crypto_transactions
-		WHERE user_id = ?
+		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, 
+			   total, date, note, created_at, type, usdt_received, image_url
+		FROM crypto_transactions 
+		WHERE user_id = ? 
 		ORDER BY date DESC
-		LIMIT ?`
+		LIMIT ?
+	`
 
 	rows, err := r.db.Query(query, userID, limit)
 	if err != nil {
@@ -387,7 +487,6 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 	defer rows.Close()
 
 	var transactions []models.TransactionDetails
-
 	for rows.Next() {
 		var tx models.CryptoTransaction
 		err := rows.Scan(
@@ -403,48 +502,40 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 			&tx.CreatedAt,
 			&tx.Type,
 			&tx.USDTReceived,
+			&tx.ImageURL,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		// Crear detalles de la transacción
+		// Obtener el precio actual
 		details := models.TransactionDetails{
 			Transaction: tx,
 		}
 
-		// Si es USDT, el precio actual es siempre 1
-		if tx.Ticker == "USDT" {
-			details.CurrentPrice = 1.0
-			details.CurrentValue = tx.Amount
-			details.GainLoss = 0.0
-			details.GainLossPercent = 0.0
-		} else {
-			// Obtener precio actual para otras criptomonedas
-			cryptoData, err := services.GetCryptoPrice(tx.Ticker)
-			if err == nil {
-				details.CurrentPrice = cryptoData.Raw[tx.Ticker]["USD"].PRICE
-				details.CurrentValue = tx.Amount * details.CurrentPrice
-
-				// Calcular ganancia/pérdida solo para compras
-				if tx.Type == models.TransactionTypeBuy {
-					details.GainLoss = details.CurrentValue - tx.Total
-					if tx.Total > 0 {
-						details.GainLossPercent = (details.GainLoss / tx.Total) * 100
-					}
-				}
+		// Intentar obtener el precio actual
+		cryptoData, err := services.GetCryptoPrice(tx.Ticker)
+		if err == nil && cryptoData.Raw[tx.Ticker]["USD"].PRICE > 0 {
+			details.CurrentPrice = cryptoData.Raw[tx.Ticker]["USD"].PRICE
+			details.CurrentValue = tx.Amount * details.CurrentPrice
+			details.GainLoss = details.CurrentValue - tx.Total
+			if tx.Total > 0 {
+				details.GainLossPercent = (details.GainLoss / tx.Total) * 100
 			}
+		} else {
+			// Si hay un error, usar el precio de compra
+			details.CurrentPrice = tx.PurchasePrice
+			details.CurrentValue = tx.Amount * tx.PurchasePrice
+			details.GainLoss = 0
+			details.GainLossPercent = 0
 		}
 
 		transactions = append(transactions, details)
 	}
 
-	// Si no hay transacciones, devolver un slice vacío en lugar de error
-	if len(transactions) == 0 {
-		return []models.TransactionDetails{}, nil
+	if err = rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return transactions, nil
 }
-
-

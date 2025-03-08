@@ -21,4 +21,5 @@ type CryptoTransaction struct {
 	CreatedAt     time.Time `json:"created_at"`
 	Type          string    `json:"type"`                    // "compra" o "venta"
 	USDTReceived  float64   `json:"usdt_received,omitempty"` // Solo para ventas
+	ImageURL      string    `json:"image_url,omitempty"`     // URL de la imagen de la criptomoneda
 }

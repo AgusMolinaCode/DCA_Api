@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -116,28 +115,6 @@ func CreateTransaction(c *gin.Context) {
 	if err := cryptoRepo.CreateTransaction(tx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al crear la transacción: %v", err)})
 		return
-	}
-
-	// Si es una venta, crear automáticamente una compra de USDT
-	if tx.Type == models.TransactionTypeSell && tx.USDTReceived > 0 {
-		// Crear transacción de compra de USDT
-		usdtTx := models.CryptoTransaction{
-			ID:            fmt.Sprintf("%d", time.Now().UnixNano()),
-			UserID:        userID,
-			CryptoName:    "Tether",
-			Ticker:        "USDT",
-			Amount:        tx.USDTReceived, // La cantidad de USDT recibidos
-			PurchasePrice: 1.0,             // El precio de USDT es 1 USD
-			Total:         tx.USDTReceived, // El total es igual a la cantidad
-			Date:          tx.Date,         // Misma fecha que la venta
-			Type:          models.TransactionTypeBuy,
-			Note:          fmt.Sprintf("Compra automática de USDT por venta de %s", tx.Ticker),
-		}
-
-		if err := cryptoRepo.CreateTransaction(usdtTx); err != nil {
-			// Solo registrar el error, no detener el flujo
-			log.Printf("Error al crear la transacción automática de USDT: %v", err)
-		}
 	}
 
 	// Obtener los detalles de la transacción recién creada
