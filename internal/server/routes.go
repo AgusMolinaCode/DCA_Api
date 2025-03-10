@@ -47,6 +47,15 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.GET("/current-balance", middleware.GetCurrentBalance)
 	}
 
+	// Configurar opciones para rutas de administración
+	router.OPTIONS("/admin/*path", func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, Admin-Key")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Status(200)
+	})
+
 	// Rutas de admin
 	admin := router.Group("/admin")
 	admin.Use(middleware.AdminAuth())
