@@ -238,7 +238,7 @@ func (r *CryptoRepository) DeleteTransaction(userID, transactionID string) error
 	return err
 }
 
-func (r *CryptoRepository) GetUserTransactions(userID string) ([]models.CryptoTransaction, error) {
+func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]models.TransactionDetails, error) {
 	query := `
 		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, 
 			   total, date, note, created_at, type, usdt_received, image_url
@@ -281,13 +281,41 @@ func (r *CryptoRepository) GetUserTransactions(userID string) ([]models.CryptoTr
 		return nil, err
 	}
 
-	return transactions, nil
+	var details []models.TransactionDetails
+	for _, tx := range transactions {
+		// Crear el objeto de detalles con la transacción base
+		detail := models.TransactionDetails{
+			Transaction: tx,
+		}
+
+		// Obtener el precio actual de la criptomoneda
+		cryptoData, err := services.GetCryptoPrice(tx.Ticker)
+		if err == nil && cryptoData.Raw[tx.Ticker]["USD"].PRICE > 0 {
+			// Si se obtiene el precio actual correctamente
+			detail.CurrentPrice = cryptoData.Raw[tx.Ticker]["USD"].PRICE
+			detail.CurrentValue = tx.Amount * detail.CurrentPrice
+			detail.GainLoss = detail.CurrentValue - tx.Total
+			if tx.Total > 0 {
+				detail.GainLossPercent = (detail.GainLoss / tx.Total) * 100
+			}
+		} else {
+			// Si hay un error, usar el precio de compra
+			detail.CurrentPrice = tx.PurchasePrice
+			detail.CurrentValue = tx.Amount * tx.PurchasePrice
+			detail.GainLoss = 0
+			detail.GainLossPercent = 0
+		}
+
+		details = append(details, detail)
+	}
+
+	return details, nil
 }
 
 func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDashboard, error) {
 	// Obtener todas las transacciones del usuario
 	query := `
-		SELECT ticker, crypto_name, amount, purchase_price, total, type
+		SELECT ticker, crypto_name, amount, purchase_price, total, type, image_url
 		FROM crypto_transactions
 		WHERE user_id = ?
 		ORDER BY date DESC`
@@ -305,8 +333,9 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 	for rows.Next() {
 		var ticker, cryptoName, txType string
 		var amount, purchasePrice, total float64
+		var imageURL sql.NullString
 
-		err := rows.Scan(&ticker, &cryptoName, &amount, &purchasePrice, &total, &txType)
+		err := rows.Scan(&ticker, &cryptoName, &amount, &purchasePrice, &total, &txType, &imageURL)
 		if err != nil {
 			return nil, err
 		}
@@ -317,6 +346,8 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 			if _, exists := cryptoMap[ticker]; !exists {
 				cryptoMap[ticker] = &models.CryptoDashboard{
 					Ticker:        ticker,
+					CryptoName:    cryptoName,
+					ImageURL:      imageURL.String,
 					TotalInvested: 0,
 					Holdings:      0,
 					AvgPrice:      1.0,
@@ -343,6 +374,8 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 		if _, exists := cryptoMap[ticker]; !exists {
 			cryptoMap[ticker] = &models.CryptoDashboard{
 				Ticker:        ticker,
+				CryptoName:    cryptoName,
+				ImageURL:      imageURL.String,
 				TotalInvested: 0,
 				Holdings:      0,
 			}

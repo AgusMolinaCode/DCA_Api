@@ -136,13 +136,13 @@ func CreateTransaction(c *gin.Context) {
 func GetUserTransactions(c *gin.Context) {
 	userID := c.GetString("userId")
 
-	transactions, err := cryptoRepo.GetUserTransactions(userID)
+	transactionsWithDetails, err := cryptoRepo.GetUserTransactionsWithDetails(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener las transacciones"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"transactions": transactions})
+	c.JSON(http.StatusOK, gin.H{"transactions": transactionsWithDetails})
 }
 
 func GetDashboard(c *gin.Context) {

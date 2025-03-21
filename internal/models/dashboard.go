@@ -2,6 +2,8 @@ package models
 
 type CryptoDashboard struct {
 	Ticker        string  `json:"ticker"`
+	CryptoName    string  `json:"crypto_name"` // Nuevo campo para el nombre de la criptomoneda
+	ImageURL      string  `json:"image_url"`   // Nuevo campo para la URL de la imagen
 	TotalInvested float64 `json:"total_invested"`
 	Holdings      float64 `json:"holdings"`
 	AvgPrice      float64 `json:"avg_price"`
