@@ -298,7 +298,13 @@ func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]mode
 			if tx.Type == models.TransactionTypeBuy {
 				// Para compras: comparamos el valor actual con el total invertido
 				detail.CurrentPrice = currentPrice
+				// El valor actual es la cantidad multiplicada por el precio actual
 				detail.CurrentValue = tx.Amount * currentPrice
+				// El total es la cantidad multiplicada por el precio de compra (lo que se pagó)
+				// Asegurarse de que tx.Total tenga el valor correcto
+				if tx.Total <= 0 {
+					tx.Total = tx.Amount * tx.PurchasePrice
+				}
 				detail.GainLoss = detail.CurrentValue - tx.Total
 				if tx.Total > 0 {
 					detail.GainLossPercent = (detail.GainLoss / tx.Total) * 100
@@ -307,41 +313,66 @@ func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]mode
 				// Para ventas: necesitamos obtener el precio promedio de compra para calcular la ganancia/pérdida
 				// Obtener el precio promedio de compra de la criptomoneda
 				avgPrice, err := r.getAveragePurchasePrice(tx.UserID, tx.Ticker, tx.Date)
-				if err != nil {
-					// Si hay un error, usar el precio de compra de la transacción
+				if err != nil || avgPrice <= 0 {
+					// Si hay un error o el precio promedio es 0, usar el precio de compra de la transacción
 					avgPrice = tx.PurchasePrice
 				}
 				// Calcular el costo base usando el precio promedio
 				costBasis := avgPrice * tx.Amount
-				revenue := tx.USDTReceived
-				if revenue <= 0 {
-					revenue = tx.Total // Si USDTReceived no está disponible, usamos Total
+
+				// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
+				if tx.USDTReceived > 0 {
+					tx.Total = tx.USDTReceived
+				} else if tx.Total <= 0 {
+					tx.Total = tx.Amount * tx.PurchasePrice
 				}
 
-				detail.CurrentPrice = tx.PurchasePrice
-				detail.CurrentValue = revenue
-				detail.GainLoss = revenue - costBasis
+				// El precio actual para mostrar
+				detail.CurrentPrice = currentPrice
+				// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
+				detail.CurrentValue = tx.Amount * currentPrice
+
+				// La ganancia/pérdida es lo que se recibió menos lo que costó
+				detail.GainLoss = tx.Total - costBasis
+
+				// Calcular el porcentaje de ganancia/pérdida
 				if costBasis > 0 {
 					detail.GainLossPercent = (detail.GainLoss / costBasis) * 100
 				}
 			}
 		} else {
-			// Si hay un error, usar el precio de compra
+			// Si hay un error, usar el precio de compra como respaldo
 			detail.CurrentPrice = tx.PurchasePrice
 
 			// Para ventas, aún podemos calcular la ganancia/pérdida
 			if tx.Type == models.TransactionTypeSell {
-				costBasis := tx.PurchasePrice * tx.Amount
-				revenue := tx.USDTReceived
-				if revenue <= 0 {
-					revenue = tx.Total
+				// Intentar obtener el precio promedio de compra
+				avgPrice, err := r.getAveragePurchasePrice(tx.UserID, tx.Ticker, tx.Date)
+				if err != nil || avgPrice <= 0 {
+					// Si hay un error o el precio promedio es 0, usar el precio de compra de la transacción
+					avgPrice = tx.PurchasePrice
 				}
-				detail.CurrentValue = revenue
-				detail.GainLoss = revenue - costBasis
+				costBasis := avgPrice * tx.Amount
+
+				// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
+				if tx.USDTReceived > 0 {
+					tx.Total = tx.USDTReceived
+				} else if tx.Total <= 0 {
+					tx.Total = tx.Amount * tx.PurchasePrice
+				}
+
+				// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
+				detail.CurrentValue = tx.Amount * tx.PurchasePrice
+
+				// La ganancia/pérdida es lo que se recibió menos lo que costó
+				detail.GainLoss = tx.Total - costBasis
+
+				// Calcular el porcentaje de ganancia/pérdida
 				if costBasis > 0 {
 					detail.GainLossPercent = (detail.GainLoss / costBasis) * 100
 				}
 			} else {
+				// Para compras, el valor actual es la cantidad multiplicada por el precio actual (que en este caso es el precio de compra)
 				detail.CurrentValue = tx.Amount * tx.PurchasePrice
 				detail.GainLoss = 0
 				detail.GainLossPercent = 0
@@ -520,7 +551,13 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 		if tx.Type == models.TransactionTypeBuy {
 			// Para compras: comparamos el valor actual con el total invertido
 			details.CurrentPrice = currentPrice
+			// El valor actual es la cantidad multiplicada por el precio actual
 			details.CurrentValue = tx.Amount * currentPrice
+			// El total es la cantidad multiplicada por el precio de compra (lo que se pagó)
+			// Asegurarse de que tx.Total tenga el valor correcto
+			if tx.Total <= 0 {
+				tx.Total = tx.Amount * tx.PurchasePrice
+			}
 			details.GainLoss = details.CurrentValue - tx.Total
 			if tx.Total > 0 {
 				details.GainLossPercent = (details.GainLoss / tx.Total) * 100
@@ -529,38 +566,61 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 			// Para ventas: necesitamos obtener el precio promedio de compra para calcular la ganancia/pérdida
 			// Obtener el precio promedio de compra de la criptomoneda
 			avgPrice, err := r.getAveragePurchasePrice(tx.UserID, tx.Ticker, tx.Date)
-			if err != nil {
-				// Si hay un error, usar el precio de compra de la transacción
+			if err != nil || avgPrice <= 0 {
+				// Si hay un error o el precio promedio es 0, usar el precio de compra de la transacción
 				avgPrice = tx.PurchasePrice
 			}
 			// Calcular el costo base usando el precio promedio
 			costBasis := avgPrice * tx.Amount
-			revenue := tx.USDTReceived
-			if revenue <= 0 {
-				revenue = tx.Total // Si USDTReceived no está disponible, usamos Total
+
+			// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
+			if tx.USDTReceived > 0 {
+				tx.Total = tx.USDTReceived
+			} else if tx.Total <= 0 {
+				tx.Total = tx.Amount * tx.PurchasePrice
 			}
 
-			details.CurrentPrice = tx.PurchasePrice
-			details.CurrentValue = revenue
-			details.GainLoss = revenue - costBasis
+			// El precio actual para mostrar
+			details.CurrentPrice = currentPrice
+			// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
+			details.CurrentValue = tx.Amount * currentPrice
+
+			// La ganancia/pérdida es lo que se recibió menos lo que costó
+			details.GainLoss = tx.Total - costBasis
+
+			// Calcular el porcentaje de ganancia/pérdida
 			if costBasis > 0 {
 				details.GainLossPercent = (details.GainLoss / costBasis) * 100
 			}
 		}
 	} else {
-		// Si hay un error, usar el precio de compra
-		log.Printf("Error al obtener precio actual de %s: %v", tx.Ticker, err)
+		// Si hay un error, usar el precio de compra como respaldo
 		details.CurrentPrice = tx.PurchasePrice
 
 		// Para ventas, aún podemos calcular la ganancia/pérdida
 		if tx.Type == models.TransactionTypeSell {
-			costBasis := tx.PurchasePrice * tx.Amount
-			revenue := tx.USDTReceived
-			if revenue <= 0 {
-				revenue = tx.Total
+			// Intentar obtener el precio promedio de compra
+			avgPrice, err := r.getAveragePurchasePrice(tx.UserID, tx.Ticker, tx.Date)
+			if err != nil || avgPrice <= 0 {
+				// Si hay un error o el precio promedio es 0, usar el precio de compra de la transacción
+				avgPrice = tx.PurchasePrice
 			}
-			details.CurrentValue = revenue
-			details.GainLoss = revenue - costBasis
+			costBasis := avgPrice * tx.Amount
+
+			// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
+			if tx.USDTReceived > 0 {
+				tx.Total = tx.USDTReceived
+			} else if tx.Total <= 0 {
+				tx.Total = tx.Amount * tx.PurchasePrice
+			}
+
+			// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
+			details.CurrentValue = tx.Amount * tx.PurchasePrice
+
+			// La ganancia/pérdida es lo que se recibió menos lo que costó
+			details.GainLoss = tx.Total - costBasis
+
+			// Calcular el porcentaje de ganancia/pérdida
 			if costBasis > 0 {
 				details.GainLossPercent = (details.GainLoss / costBasis) * 100
 			}
@@ -629,31 +689,43 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 			if tx.Type == models.TransactionTypeBuy {
 				// Para compras: comparamos el valor actual con el total invertido
 				details.CurrentPrice = currentPrice
+				// El valor actual es la cantidad multiplicada por el precio actual
 				details.CurrentValue = tx.Amount * currentPrice
+				// El total es la cantidad multiplicada por el precio de compra (lo que se pagó)
+				// Asegurarse de que tx.Total tenga el valor correcto
+				if tx.Total <= 0 {
+					tx.Total = tx.Amount * tx.PurchasePrice
+				}
 				details.GainLoss = details.CurrentValue - tx.Total
 				if tx.Total > 0 {
 					details.GainLossPercent = (details.GainLoss / tx.Total) * 100
 				}
 			} else if tx.Type == models.TransactionTypeSell {
-				// Para ventas: necesitamos obtener el precio promedio de compra para calcular la ganancia/pérdida
+				// Calcular el costo base usando el precio promedio
 				avgPrice, err := r.getAveragePurchasePrice(tx.UserID, tx.Ticker, tx.Date)
-				if err != nil {
-					// Si hay un error, usar el precio de compra de la transacción
+				if err != nil || avgPrice <= 0 {
+					// Si hay un error o el precio promedio es 0, usar el precio de compra de la transacción
 					avgPrice = tx.PurchasePrice
 				}
 
-				// Calcular el costo base usando el precio promedio
 				costBasis := avgPrice * tx.Amount
-				revenue := tx.USDTReceived
-				if revenue <= 0 {
-					revenue = tx.Total // Si USDTReceived no está disponible, usamos Total
+
+				// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
+				if tx.USDTReceived > 0 {
+					tx.Total = tx.USDTReceived
+				} else if tx.Total <= 0 {
+					tx.Total = tx.Amount * tx.PurchasePrice
 				}
 
-				// Para ventas, mostrar el precio actual de mercado, no el precio de compra
+				// El precio actual para mostrar
 				details.CurrentPrice = currentPrice
-				// El valor actual para una venta ya realizada es el ingreso recibido
-				details.CurrentValue = revenue
-				details.GainLoss = revenue - costBasis
+				// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
+				details.CurrentValue = tx.Amount * currentPrice
+
+				// La ganancia/pérdida es lo que se recibió menos lo que costó
+				details.GainLoss = tx.Total - costBasis
+
+				// Calcular el porcentaje de ganancia/pérdida
 				if costBasis > 0 {
 					details.GainLossPercent = (details.GainLoss / costBasis) * 100
 				}
@@ -664,23 +736,34 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 
 			// Para ventas, aún podemos calcular la ganancia/pérdida
 			if tx.Type == models.TransactionTypeSell {
+				// Intentar obtener el precio promedio de compra
 				avgPrice, err := r.getAveragePurchasePrice(tx.UserID, tx.Ticker, tx.Date)
-				if err != nil {
-					// Si hay un error, usar el precio de compra de la transacción
+				if err != nil || avgPrice <= 0 {
+					// Si hay un error o el precio promedio es 0, usar el precio de compra de la transacción
 					avgPrice = tx.PurchasePrice
 				}
 
 				costBasis := avgPrice * tx.Amount
-				revenue := tx.USDTReceived
-				if revenue <= 0 {
-					revenue = tx.Total
+
+				// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
+				if tx.USDTReceived > 0 {
+					tx.Total = tx.USDTReceived
+				} else if tx.Total <= 0 {
+					tx.Total = tx.Amount * tx.PurchasePrice
 				}
-				details.CurrentValue = revenue
-				details.GainLoss = revenue - costBasis
+
+				// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
+				details.CurrentValue = tx.Amount * tx.PurchasePrice
+
+				// La ganancia/pérdida es lo que se recibió menos lo que costó
+				details.GainLoss = tx.Total - costBasis
+
+				// Calcular el porcentaje de ganancia/pérdida
 				if costBasis > 0 {
 					details.GainLossPercent = (details.GainLoss / costBasis) * 100
 				}
 			} else {
+				// Para compras, el valor actual es la cantidad multiplicada por el precio actual (que en este caso es el precio de compra)
 				details.CurrentValue = tx.Amount * tx.PurchasePrice
 				details.GainLoss = 0
 				details.GainLossPercent = 0
