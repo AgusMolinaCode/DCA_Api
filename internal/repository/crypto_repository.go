@@ -733,7 +733,7 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 					avgPrice = tx.PurchasePrice
 				}
 
-				costBasis := avgPrice * tx.Amount
+				// costBasis := avgPrice * tx.Amount
 
 				// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
 				if tx.USDTReceived > 0 {
@@ -745,12 +745,15 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 				// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
 				details.CurrentValue = tx.Amount * currentPrice
 
-				// Para ventas, la ganancia/pérdida debe ser valor actual (lo que valdría ahora) - total invertido (lo que costó cuando lo compramos)
-				details.GainLoss = details.CurrentValue - costBasis
+				// Para ventas, la ganancia/pérdida debe ser lo que se recibió por la venta (tx.Total) menos lo que valdría ahora (details.CurrentValue)
+				details.GainLoss = tx.Total - details.CurrentValue
+
+				//muestrame por consola details.Gainloss
+				fmt.Println("details.GainLoss:", details.GainLoss)
 
 				// Calcular el porcentaje de ganancia/pérdida
-				if costBasis > 0 {
-					details.GainLossPercent = (details.GainLoss / costBasis) * 100
+				if details.CurrentValue > 0 {
+					details.GainLossPercent = (details.GainLoss / details.CurrentValue) * 100
 				}
 			}
 		} else {
@@ -766,7 +769,7 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 					avgPrice = tx.PurchasePrice
 				}
 
-				costBasis := avgPrice * tx.Amount
+				// costBasis := avgPrice * tx.Amount
 
 				// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
 				if tx.USDTReceived > 0 {
@@ -778,12 +781,12 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 				// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
 				details.CurrentValue = tx.Amount * tx.PurchasePrice
 
-				// La ganancia/pérdida es lo que se recibió menos lo que costó
-				details.GainLoss = tx.Total - costBasis
+				// La ganancia/pérdida es lo que se recibió menos lo que valdría ahora
+				details.GainLoss = tx.Total - details.CurrentValue
 
 				// Calcular el porcentaje de ganancia/pérdida
-				if costBasis > 0 {
-					details.GainLossPercent = (details.GainLoss / costBasis) * 100
+				if details.CurrentValue > 0 {
+					details.GainLossPercent = (details.GainLoss / details.CurrentValue) * 100
 				}
 			} else {
 				// Para compras, el valor actual es la cantidad multiplicada por el precio actual (que en este caso es el precio de compra)
