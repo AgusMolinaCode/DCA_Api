@@ -305,6 +305,8 @@ func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]mode
 				if tx.Total <= 0 {
 					tx.Total = tx.Amount * tx.PurchasePrice
 				}
+				// Corregido: El cálculo debe ser valor actual menos total invertido
+				// Si el valor actual es menor que el total invertido, será una pérdida (número negativo)
 				detail.GainLoss = detail.CurrentValue - tx.Total
 				if tx.Total > 0 {
 					detail.GainLossPercent = (detail.GainLoss / tx.Total) * 100
@@ -372,7 +374,6 @@ func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]mode
 					detail.GainLossPercent = (detail.GainLoss / costBasis) * 100
 				}
 			} else {
-				// Para compras, el valor actual es la cantidad multiplicada por el precio actual (que en este caso es el precio de compra)
 				detail.CurrentValue = tx.Amount * tx.PurchasePrice
 				detail.GainLoss = 0
 				detail.GainLossPercent = 0
@@ -558,6 +559,8 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 			if tx.Total <= 0 {
 				tx.Total = tx.Amount * tx.PurchasePrice
 			}
+			// Corregido: El cálculo debe ser valor actual menos total invertido
+			// Si el valor actual es menor que el total invertido, será una pérdida (número negativo)
 			details.GainLoss = details.CurrentValue - tx.Total
 			if tx.Total > 0 {
 				details.GainLossPercent = (details.GainLoss / tx.Total) * 100
@@ -696,6 +699,8 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 				if tx.Total <= 0 {
 					tx.Total = tx.Amount * tx.PurchasePrice
 				}
+				// Corregido: El cálculo debe ser valor actual menos total invertido
+				// Si el valor actual es menor que el total invertido, será una pérdida (número negativo)
 				details.GainLoss = details.CurrentValue - tx.Total
 				if tx.Total > 0 {
 					details.GainLossPercent = (details.GainLoss / tx.Total) * 100
