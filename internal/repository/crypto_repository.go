@@ -296,18 +296,23 @@ func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]mode
 
 			// Calcular ganancia/pérdida según el tipo de transacción
 			if tx.Type == models.TransactionTypeBuy {
-				// Para compras: comparamos el valor actual con el total invertido
+				// Para compras:
+				// Precio: precio de compra
+				// Precio actual: obtenido de la API
 				detail.CurrentPrice = currentPrice
-				// El valor actual es la cantidad multiplicada por el precio actual
-				detail.CurrentValue = tx.Amount * currentPrice
-				// El total es la cantidad multiplicada por el precio de compra (lo que se pagó)
-				// Asegurarse de que tx.Total tenga el valor correcto
+
+				// Asegurarse de que tx.Total tenga el valor correcto (precio * cantidad)
 				if tx.Total <= 0 {
 					tx.Total = tx.Amount * tx.PurchasePrice
 				}
-				// Corregido: El cálculo debe ser valor actual menos total invertido
-				// Si el valor actual es menor que el total invertido, será una pérdida (número negativo)
+
+				// Valor actual: precio actual * cantidad
+				detail.CurrentValue = tx.Amount * currentPrice
+
+				// Ganancia/pérdida: valor actual - total
 				detail.GainLoss = detail.CurrentValue - tx.Total
+
+				// Porcentaje de ganancia/pérdida
 				if tx.Total > 0 {
 					detail.GainLossPercent = (detail.GainLoss / tx.Total) * 100
 				}
@@ -550,18 +555,23 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 
 		// Calcular ganancia/pérdida según el tipo de transacción
 		if tx.Type == models.TransactionTypeBuy {
-			// Para compras: comparamos el valor actual con el total invertido
+			// Para compras:
+			// Precio: precio de compra
+			// Precio actual: obtenido de la API
 			details.CurrentPrice = currentPrice
-			// El valor actual es la cantidad multiplicada por el precio actual
-			details.CurrentValue = tx.Amount * currentPrice
-			// El total es la cantidad multiplicada por el precio de compra (lo que se pagó)
-			// Asegurarse de que tx.Total tenga el valor correcto
+
+			// Asegurarse de que tx.Total tenga el valor correcto (precio * cantidad)
 			if tx.Total <= 0 {
 				tx.Total = tx.Amount * tx.PurchasePrice
 			}
-			// Corregido: El cálculo debe ser valor actual menos total invertido
-			// Si el valor actual es menor que el total invertido, será una pérdida (número negativo)
+
+			// Valor actual: precio actual * cantidad
+			details.CurrentValue = tx.Amount * currentPrice
+
+			// Ganancia/pérdida: valor actual - total
 			details.GainLoss = details.CurrentValue - tx.Total
+
+			// Porcentaje de ganancia/pérdida
 			if tx.Total > 0 {
 				details.GainLossPercent = (details.GainLoss / tx.Total) * 100
 			}
@@ -690,22 +700,32 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 
 			// Calcular ganancia/pérdida según el tipo de transacción
 			if tx.Type == models.TransactionTypeBuy {
-				// Para compras: comparamos el valor actual con el total invertido
+				// Para compras:
+				// Precio: precio de compra
+				// Precio actual: obtenido de la API
 				details.CurrentPrice = currentPrice
-				// El valor actual es la cantidad multiplicada por el precio actual
-				details.CurrentValue = tx.Amount * currentPrice
-				// El total es la cantidad multiplicada por el precio de compra (lo que se pagó)
-				// Asegurarse de que tx.Total tenga el valor correcto
+
+				// Asegurarse de que tx.Total tenga el valor correcto (precio * cantidad)
 				if tx.Total <= 0 {
 					tx.Total = tx.Amount * tx.PurchasePrice
 				}
-				// Corregido: El cálculo debe ser valor actual menos total invertido
-				// Si el valor actual es menor que el total invertido, será una pérdida (número negativo)
+
+				// Valor actual: precio actual * cantidad
+				details.CurrentValue = tx.Amount * currentPrice
+
+				// Ganancia/pérdida: valor actual - total
 				details.GainLoss = details.CurrentValue - tx.Total
+
+				// Porcentaje de ganancia/pérdida
 				if tx.Total > 0 {
 					details.GainLossPercent = (details.GainLoss / tx.Total) * 100
 				}
 			} else if tx.Type == models.TransactionTypeSell {
+				// Para ventas:
+				// Precio: precio de venta
+				// Precio actual: obtenido de la API
+				details.CurrentPrice = currentPrice
+
 				// Calcular el costo base usando el precio promedio
 				avgPrice, err := r.getAveragePurchasePrice(tx.UserID, tx.Ticker, tx.Date)
 				if err != nil || avgPrice <= 0 {
@@ -722,13 +742,11 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 					tx.Total = tx.Amount * tx.PurchasePrice
 				}
 
-				// El precio actual para mostrar
-				details.CurrentPrice = currentPrice
 				// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
 				details.CurrentValue = tx.Amount * currentPrice
 
-				// La ganancia/pérdida es lo que se recibió menos lo que costó
-				details.GainLoss = tx.Total - costBasis
+				// Para ventas, la ganancia/pérdida debe ser valor actual (lo que valdría ahora) - total invertido (lo que costó cuando lo compramos)
+				details.GainLoss = details.CurrentValue - costBasis
 
 				// Calcular el porcentaje de ganancia/pérdida
 				if costBasis > 0 {
