@@ -748,9 +748,6 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 				// Para ventas, la ganancia/pérdida debe ser lo que se recibió por la venta (tx.Total) menos lo que valdría ahora (details.CurrentValue)
 				details.GainLoss = tx.Total - details.CurrentValue
 
-				//muestrame por consola details.Gainloss
-				fmt.Println("details.GainLoss:", details.GainLoss)
-
 				// Calcular el porcentaje de ganancia/pérdida
 				if details.CurrentValue > 0 {
 					details.GainLossPercent = (details.GainLoss / details.CurrentValue) * 100
