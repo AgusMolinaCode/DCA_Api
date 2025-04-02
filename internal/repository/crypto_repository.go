@@ -392,12 +392,12 @@ func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]mode
 }
 
 func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDashboard, error) {
-	// Obtener todas las transacciones del usuario
+	// Obtener todas las transacciones del usuario ordenadas por fecha
 	query := `
-		SELECT ticker, crypto_name, amount, purchase_price, total, type, image_url
+		SELECT id, ticker, crypto_name, amount, purchase_price, total, type, image_url, date, usdt_received
 		FROM crypto_transactions
 		WHERE user_id = ?
-		ORDER BY date DESC`
+		ORDER BY date ASC` // Ordenamos por fecha ascendente para procesar cronológicamente
 
 	rows, err := r.db.Query(query, userID)
 	if err != nil {
@@ -408,13 +408,15 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 	// Mapa para acumular datos por criptomoneda
 	cryptoMap := make(map[string]*models.CryptoDashboard)
 
-	// Procesar cada transacción
+	// Procesar cada transacción cronológicamente
 	for rows.Next() {
-		var ticker, cryptoName, txType string
+		var id, ticker, cryptoName, txType string
 		var amount, purchasePrice, total float64
 		var imageURL sql.NullString
+		var date time.Time
+		var usdtReceived float64
 
-		err := rows.Scan(&ticker, &cryptoName, &amount, &purchasePrice, &total, &txType, &imageURL)
+		err := rows.Scan(&id, &ticker, &cryptoName, &amount, &purchasePrice, &total, &txType, &imageURL, &date, &usdtReceived)
 		if err != nil {
 			return nil, err
 		}
@@ -478,6 +480,19 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 			}
 			cryptoMap[ticker].TotalInvested += total
 		} else if txType == models.TransactionTypeSell {
+			// Calcular el costo promedio por unidad antes de la venta
+			var costPerUnit float64
+			if cryptoMap[ticker].Holdings > 0 {
+				costPerUnit = cryptoMap[ticker].TotalInvested / cryptoMap[ticker].Holdings
+			}
+
+			// Calcular el costo base de las unidades vendidas
+			costBasisSold := costPerUnit * amount
+
+			// Ajustar el total invertido restando el costo base de las unidades vendidas
+			cryptoMap[ticker].TotalInvested -= costBasisSold
+
+			// Actualizar las tenencias
 			cryptoMap[ticker].Holdings -= amount
 		}
 	}
@@ -495,12 +510,24 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 			// Obtener precio actual
 			if crypto.Ticker != "USDT" {
 				cryptoData, err := services.GetCryptoPrice(crypto.Ticker)
-				if err == nil {
+				if err == nil && cryptoData != nil {
 					crypto.CurrentPrice = cryptoData.Raw[crypto.Ticker]["USD"].PRICE
-					crypto.CurrentProfit = (crypto.CurrentPrice - crypto.AvgPrice) * crypto.Holdings
+
+					// Calcular el valor actual de las tenencias
+					currentValue := crypto.CurrentPrice * crypto.Holdings
+
+					// Calcular el profit basado en el valor actual vs total invertido
+					crypto.CurrentProfit = currentValue - crypto.TotalInvested
+
+					// Calcular el porcentaje de ganancia/pérdida
 					if crypto.TotalInvested > 0 {
 						crypto.ProfitPercent = (crypto.CurrentProfit / crypto.TotalInvested) * 100
 					}
+				} else {
+					// Si no podemos obtener el precio actual, usamos el promedio como respaldo
+					crypto.CurrentPrice = crypto.AvgPrice
+					crypto.CurrentProfit = 0
+					crypto.ProfitPercent = 0
 				}
 			}
 
