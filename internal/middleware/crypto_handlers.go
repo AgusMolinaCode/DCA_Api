@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/database"
@@ -367,4 +368,26 @@ func DeleteTransaction(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Transacción eliminada exitosamente",
 	})
+}
+
+// DeleteTransactionsByTicker elimina todas las transacciones de una criptomoneda
+func DeleteTransactionsByTicker(c *gin.Context) {
+	userID := c.GetString("userId")
+	ticker := c.Param("ticker")
+
+	if ticker == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Se requiere un ticker válido"})
+		return
+	}
+
+	// Convertir ticker a mayúsculas para asegurar consistencia
+	ticker = strings.ToUpper(ticker)
+
+	err := cryptoRepo.DeleteTransactionsByTicker(userID, ticker)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al eliminar transacciones: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Todas las transacciones de %s han sido eliminadas exitosamente", ticker)})
 }

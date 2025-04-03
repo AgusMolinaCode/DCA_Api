@@ -238,6 +238,57 @@ func (r *CryptoRepository) DeleteTransaction(userID, transactionID string) error
 	return err
 }
 
+// DeleteTransactionsByTicker elimina todas las transacciones de una criptomoneda específica para un usuario
+func (r *CryptoRepository) DeleteTransactionsByTicker(userID, ticker string) error {
+	// Verificar que el ticker exista para el usuario
+	checkQuery := `SELECT COUNT(*) FROM crypto_transactions WHERE user_id = ? AND ticker = ?`
+	var count int
+	err := r.db.QueryRow(checkQuery, userID, ticker).Scan(&count)
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return fmt.Errorf("no se encontraron transacciones con el ticker %s", ticker)
+	}
+
+	// Iniciar una transacción para asegurar que todas las operaciones se completen o ninguna
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Eliminar todas las transacciones con ese ticker
+	deleteQuery := `DELETE FROM crypto_transactions WHERE user_id = ? AND ticker = ?`
+	result, err := tx.Exec(deleteQuery, userID, ticker)
+	if err != nil {
+		return err
+	}
+
+	// Verificar cuántas filas se eliminaron
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	// Si no se eliminó ninguna fila, devolver un error
+	if rowsAffected == 0 {
+		return fmt.Errorf("no se encontraron transacciones con el ticker %s", ticker)
+	}
+
+	// Confirmar la transacción
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]models.TransactionDetails, error) {
 	query := `
 		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, 
