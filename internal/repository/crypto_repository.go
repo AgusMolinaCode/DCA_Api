@@ -249,7 +249,7 @@ func (r *CryptoRepository) DeleteTransactionsByTicker(userID, ticker string) err
 	}
 
 	if count == 0 {
-		return fmt.Errorf("no se encontraron transacciones con el ticker %s", ticker)
+		return fmt.Errorf("No se encontraron transacciones con el ticker %s", ticker)
 	}
 
 	// Iniciar una transacción para asegurar que todas las operaciones se completen o ninguna
