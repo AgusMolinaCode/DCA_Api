@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,6 +56,16 @@ func CreateTransaction(c *gin.Context) {
 	if tx.Type != models.TransactionTypeBuy && tx.Type != models.TransactionTypeSell {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Tipo de transacción inválido. Debe ser 'compra' o 'venta'"})
 		return
+	}
+
+	// Obtener la URL de la imagen del ticker
+	imageURL, err := services.GetCryptoImageURL(tx.Ticker)
+	if err != nil {
+		// Si hay un error, solo lo registramos pero continuamos con la creación de la transacción
+		log.Printf("Error al obtener la URL de la imagen para %s: %v", tx.Ticker, err)
+	} else {
+		// Guardar la URL de la imagen en la transacción
+		tx.ImageURL = imageURL
 	}
 
 	// Si es una venta, verificar si el usuario tiene suficientes fondos

@@ -21,6 +21,7 @@ type Raw struct {
 	PRICE           float64 `json:"PRICE"`
 	CHANGE24HOUR    float64 `json:"CHANGE24HOUR"`
 	CHANGEPCT24HOUR float64 `json:"CHANGEPCT24HOUR"`
+	IMAGEURL        string  `json:"IMAGEURL"`
 }
 
 type Display struct {

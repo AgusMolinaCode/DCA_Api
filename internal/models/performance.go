@@ -9,4 +9,5 @@ type PerformanceDetail struct {
 	Ticker       string  `json:"ticker"`
 	ChangePct24h float64 `json:"change_percent_24h"`
 	PriceChange  float64 `json:"price_change"`
+	ImageURL     string  `json:"image_url"`
 }

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/models"
 )
@@ -41,4 +42,32 @@ func GetCryptoPrice(ticker string) (*models.Welcome, error) {
 	}
 
 	return &result, nil
+}
+
+func GetCryptoImageURL(ticker string) (string, error) {
+	// Intentar obtener todos los datos de la criptomoneda, que incluyen la URL de la imagen
+	cryptoData, err := GetCryptoPrice(ticker)
+	if err != nil {
+		return "", err
+	}
+
+	// Verificar si existe la información del ticker
+	if _, exists := cryptoData.Raw[ticker]; !exists {
+		return "", fmt.Errorf("no se encontraron datos para %s", ticker)
+	}
+
+	// Obtener la URL de la imagen
+	imageURL := cryptoData.Raw[ticker]["USD"].IMAGEURL
+
+	// Si la URL está vacía, construir una URL por defecto usando el servicio de CryptoCompare
+	if imageURL == "" {
+		imageURL = fmt.Sprintf("https://www.cryptocompare.com/media/37746251/%s.png", strings.ToLower(ticker))
+	} else {
+		// Asegurarse de que la URL sea completa
+		if !strings.HasPrefix(imageURL, "http") {
+			imageURL = "https://www.cryptocompare.com" + imageURL
+		}
+	}
+
+	return imageURL, nil
 }
