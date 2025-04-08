@@ -115,8 +115,8 @@ func AddAssetsToBolsa(c *gin.Context) {
 	}
 
 	// Obtener el ID del usuario del contexto
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userID := c.GetString("userId")
+	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
 		return
 	}
@@ -130,7 +130,7 @@ func AddAssetsToBolsa(c *gin.Context) {
 	}
 
 	// Verificar que la bolsa pertenece al usuario
-	if bolsa.UserID != userID.(string) {
+	if bolsa.UserID != userID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para acceder a esta bolsa"})
 		return
 	}
