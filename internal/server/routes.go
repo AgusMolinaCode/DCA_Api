@@ -15,6 +15,7 @@ func RegisterRoutes(router *gin.Engine) {
 	// Luego inicializar repositorios
 	middleware.InitAuth()
 	middleware.InitCrypto()
+	middleware.InitBolsa() // Inicializar el repositorio de bolsas
 
 	router.POST("/signup", middleware.Signup)
 	router.POST("/login", middleware.Login)
@@ -46,6 +47,13 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.GET("/performance", middleware.GetPerformance)
 		protected.GET("/holdings", middleware.GetHoldings)
 		protected.GET("/current-balance", middleware.GetCurrentBalance)
+
+		// Nuevas rutas para bolsas
+		protected.POST("/bolsas", middleware.CreateBolsa)
+		protected.GET("/bolsas", middleware.GetUserBolsas)
+		protected.GET("/bolsas/:id", middleware.GetBolsaDetails)
+		protected.POST("/bolsas/:id/assets", middleware.AddAssetsToBolsa)
+
 	}
 
 	// Configurar opciones para rutas de administración
