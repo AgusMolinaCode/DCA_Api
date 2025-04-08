@@ -98,7 +98,7 @@ func GetBolsaDetails(c *gin.Context) {
 
 	// Verificar que la bolsa pertenece al usuario
 	if bolsa.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no tienes permiso para acceder a esta bolsa"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "no tienes permiso para acceder a esta bolsa."})
 		return
 	}
 
