@@ -384,3 +384,65 @@ func (r *BolsaRepository) UpdateRule(rule models.TriggerRule) error {
 
 	return err
 }
+
+// UpdateBolsa actualiza los datos de una bolsa existente
+func (r *BolsaRepository) UpdateBolsa(bolsa models.Bolsa) error {
+	// Iniciar transacción SQL
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	// Actualizar la bolsa en la base de datos
+	_, err = tx.Exec(
+		`UPDATE bolsas SET 
+			name = ?, 
+			description = ?, 
+			goal = ?, 
+			updated_at = ? 
+		WHERE id = ?`,
+		bolsa.Name, bolsa.Description, bolsa.Goal, time.Now(), bolsa.ID,
+	)
+
+	return err
+}
+
+// UpdateAsset actualiza un activo existente en una bolsa
+func (r *BolsaRepository) UpdateAsset(asset models.AssetInBolsa) error {
+	// Iniciar transacción SQL
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	// Actualizar el activo en la base de datos
+	_, err = tx.Exec(
+		`UPDATE assets_in_bolsa SET 
+			crypto_name = ?, 
+			ticker = ?, 
+			amount = ?, 
+			purchase_price = ?, 
+			total = ?, 
+			image_url = ?, 
+			updated_at = ? 
+		WHERE id = ?`,
+		asset.CryptoName, asset.Ticker, asset.Amount, asset.PurchasePrice,
+		asset.Total, asset.ImageURL, time.Now(), asset.ID,
+	)
+
+	return err
+}

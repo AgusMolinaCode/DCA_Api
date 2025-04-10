@@ -274,3 +274,380 @@ func AddAssetsToBolsa(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+// UpdateBolsa actualiza una bolsa existente y sus activos
+func UpdateBolsa(c *gin.Context) {
+	// Obtener el ID de la bolsa de los parámetros de la URL
+	bolsaID := c.Param("id")
+	if bolsaID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID de bolsa no proporcionado"})
+		return
+	}
+
+	// Obtener el ID del usuario del contexto
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
+		return
+	}
+
+	// Obtener la bolsa actual para verificar que pertenece al usuario
+	bolsaRepo := repository.NewBolsaRepository(database.DB)
+	existingBolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Bolsa no encontrada"})
+		return
+	}
+
+	// Verificar que la bolsa pertenece al usuario
+	if existingBolsa.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para acceder a esta bolsa"})
+		return
+	}
+
+	// Parsear los datos de actualización del cuerpo de la solicitud
+	var request struct {
+		Name        string                `json:"name,omitempty"`
+		Description string                `json:"description,omitempty"`
+		Goal        float64               `json:"goal,omitempty"`
+		Assets      []models.AssetInBolsa `json:"assets,omitempty"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Actualizar los campos básicos de la bolsa si se proporcionaron
+	updated := false
+	if request.Name != "" {
+		existingBolsa.Name = request.Name
+		updated = true
+	}
+
+	if request.Description != "" {
+		existingBolsa.Description = request.Description
+		updated = true
+	}
+
+	if request.Goal > 0 {
+		existingBolsa.Goal = request.Goal
+		updated = true
+	}
+
+	if updated {
+		existingBolsa.UpdatedAt = time.Now()
+
+		// Guardar los cambios en la base de datos
+		err = bolsaRepo.UpdateBolsa(*existingBolsa)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al actualizar la bolsa"})
+			return
+		}
+	}
+
+	// Actualizar los activos si se proporcionaron
+	updatedAssets := []models.AssetInBolsa{}
+	if len(request.Assets) > 0 {
+		for _, updatedAsset := range request.Assets {
+			// Buscar el activo existente por ID
+			found := false
+			for _, existingAsset := range existingBolsa.Assets {
+				if updatedAsset.ID == existingAsset.ID {
+					// Actualizar solo los campos proporcionados
+					if updatedAsset.Amount > 0 {
+						existingAsset.Amount = updatedAsset.Amount
+					}
+
+					if updatedAsset.PurchasePrice > 0 {
+						existingAsset.PurchasePrice = updatedAsset.PurchasePrice
+					}
+
+					// Recalcular valores derivados
+					existingAsset.Total = existingAsset.Amount * existingAsset.PurchasePrice
+
+					// Obtener precio actual y calcular valores derivados
+					cryptoData, err := services.GetCryptoPrice(existingAsset.Ticker)
+					if err != nil {
+						// Si no se puede obtener el precio actual, usar el precio de compra
+						log.Printf("Error al obtener precio para %s: %v", existingAsset.Ticker, err)
+						existingAsset.CurrentPrice = existingAsset.PurchasePrice
+					} else {
+						existingAsset.CurrentPrice = cryptoData.Raw[existingAsset.Ticker]["USD"].PRICE
+					}
+
+					existingAsset.CurrentValue = existingAsset.Amount * existingAsset.CurrentPrice
+					existingAsset.GainLoss = existingAsset.CurrentValue - existingAsset.Total
+
+					if existingAsset.Total > 0 {
+						existingAsset.GainLossPercent = (existingAsset.GainLoss / existingAsset.Total) * 100
+					}
+
+					existingAsset.UpdatedAt = time.Now()
+
+					// Actualizar el activo en la base de datos
+					err = bolsaRepo.UpdateAsset(existingAsset)
+					if err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al actualizar activo: " + existingAsset.ID})
+						return
+					}
+
+					updatedAssets = append(updatedAssets, existingAsset)
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				// Si no se encontró el activo, devolver un error
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Activo no encontrado: " + updatedAsset.ID})
+				return
+			}
+		}
+	}
+
+	// Obtener la bolsa actualizada con todos sus datos
+	updatedBolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener la bolsa actualizada"})
+		return
+	}
+
+	// Calcular información de progreso actualizada
+	if updatedBolsa.Goal > 0 {
+		// Calcular el porcentaje real de progreso
+		rawPercent := (updatedBolsa.CurrentValue / updatedBolsa.Goal) * 100
+
+		// Crear objeto de progreso
+		progress := &models.ProgressInfo{
+			RawPercent: rawPercent,
+		}
+
+		// Limitar el porcentaje mostrado a 100% si se superó el objetivo
+		if rawPercent > 100 {
+			progress.Percent = 100
+			progress.Status = "superado"
+			progress.ExcessAmount = updatedBolsa.CurrentValue - updatedBolsa.Goal
+			progress.ExcessPercent = rawPercent - 100
+		} else if rawPercent == 100 {
+			progress.Percent = 100
+			progress.Status = "completado"
+		} else {
+			progress.Percent = rawPercent
+			progress.Status = "pendiente"
+		}
+
+		// Asignar el progreso a la bolsa
+		updatedBolsa.Progress = progress
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":        "Bolsa actualizada correctamente",
+		"bolsa":          updatedBolsa,
+		"updated_assets": updatedAssets,
+	})
+}
+
+// CompleteBolsaAndTransfer completa una bolsa y transfiere el exceso a otra bolsa
+func CompleteBolsaAndTransfer(c *gin.Context) {
+	// Obtener el ID de la bolsa de los parámetros de la URL
+	bolsaID := c.Param("id")
+	if bolsaID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID de bolsa no proporcionado"})
+		return
+	}
+
+	// Obtener el ID del usuario del contexto
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
+		return
+	}
+
+	// Parsear los datos de la solicitud
+	var request struct {
+		TargetBolsaID string `json:"target_bolsa_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verificar que la bolsa destino exista y pertenezca al usuario
+	bolsaRepo := repository.NewBolsaRepository(database.DB)
+	targetBolsa, err := bolsaRepo.GetBolsaByID(request.TargetBolsaID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Bolsa destino no encontrada"})
+		return
+	}
+
+	if targetBolsa.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para acceder a la bolsa destino"})
+		return
+	}
+
+	// Obtener la bolsa origen
+	sourceBolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Bolsa origen no encontrada"})
+		return
+	}
+
+	// Verificar que la bolsa origen pertenezca al usuario
+	if sourceBolsa.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para acceder a la bolsa origen"})
+		return
+	}
+
+	// Verificar que la bolsa origen tenga un objetivo y que lo haya superado
+	if sourceBolsa.Goal <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "La bolsa origen no tiene un objetivo definido"})
+		return
+	}
+
+	if sourceBolsa.CurrentValue <= sourceBolsa.Goal {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "La bolsa origen no ha superado su objetivo"})
+		return
+	}
+
+	// Calcular el exceso a transferir
+	excessAmount := sourceBolsa.CurrentValue - sourceBolsa.Goal
+	if excessAmount <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No hay exceso para transferir"})
+		return
+	}
+
+	// Calcular el porcentaje de exceso para cada activo
+	excessRatio := excessAmount / sourceBolsa.CurrentValue
+
+	// Preparar los activos a transferir
+	transferredAssets := []models.AssetInBolsa{}
+
+	// Para cada activo en la bolsa origen
+	for _, asset := range sourceBolsa.Assets {
+		// Calcular la cantidad a transferir
+		transferAmount := asset.Amount * excessRatio
+
+		// Si la cantidad a transferir es significativa
+		if transferAmount > 0 {
+			// Crear un nuevo activo para la bolsa destino
+			newAsset := models.AssetInBolsa{
+				ID:              models.GenerateUUID(),
+				BolsaID:         targetBolsa.ID,
+				CryptoName:      asset.CryptoName,
+				Ticker:          asset.Ticker,
+				Amount:          transferAmount,
+				PurchasePrice:   asset.CurrentPrice, // Usar el precio actual como precio de compra
+				Total:           transferAmount * asset.CurrentPrice,
+				CurrentPrice:    asset.CurrentPrice,
+				CurrentValue:    transferAmount * asset.CurrentPrice,
+				GainLoss:        0, // No hay ganancia/pérdida inicial
+				GainLossPercent: 0,
+				ImageURL:        asset.ImageURL,
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+			}
+
+			// Agregar el activo a la lista de activos transferidos
+			transferredAssets = append(transferredAssets, newAsset)
+
+			// Actualizar la cantidad del activo en la bolsa origen
+			asset.Amount -= transferAmount
+			asset.Total = asset.Amount * asset.PurchasePrice
+			asset.CurrentValue = asset.Amount * asset.CurrentPrice
+			asset.GainLoss = asset.CurrentValue - asset.Total
+			if asset.Total > 0 {
+				asset.GainLossPercent = (asset.GainLoss / asset.Total) * 100
+			}
+			asset.UpdatedAt = time.Now()
+
+			// Actualizar el activo en la base de datos
+			err = bolsaRepo.UpdateAsset(asset)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al actualizar activo en bolsa origen: " + asset.ID})
+				return
+			}
+		}
+	}
+
+	// Agregar los activos transferidos a la bolsa destino
+	for _, asset := range transferredAssets {
+		err = bolsaRepo.AddAssetToBolsa(asset)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al agregar activo a bolsa destino: " + asset.ID})
+			return
+		}
+	}
+
+	// Obtener las bolsas actualizadas
+	updatedSourceBolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener bolsa origen actualizada"})
+		return
+	}
+
+	updatedTargetBolsa, err := bolsaRepo.GetBolsaByID(request.TargetBolsaID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener bolsa destino actualizada"})
+		return
+	}
+
+	// Calcular información de progreso para ambas bolsas
+	// Bolsa origen
+	if updatedSourceBolsa.Goal > 0 {
+		rawPercent := (updatedSourceBolsa.CurrentValue / updatedSourceBolsa.Goal) * 100
+		progress := &models.ProgressInfo{
+			RawPercent: rawPercent,
+		}
+
+		if rawPercent > 100 {
+			progress.Percent = 100
+			progress.Status = "superado"
+			progress.ExcessAmount = updatedSourceBolsa.CurrentValue - updatedSourceBolsa.Goal
+			progress.ExcessPercent = rawPercent - 100
+		} else if rawPercent == 100 {
+			progress.Percent = 100
+			progress.Status = "completado"
+		} else {
+			progress.Percent = rawPercent
+			progress.Status = "pendiente"
+		}
+
+		updatedSourceBolsa.Progress = progress
+	}
+
+	// Bolsa destino
+	if updatedTargetBolsa.Goal > 0 {
+		rawPercent := (updatedTargetBolsa.CurrentValue / updatedTargetBolsa.Goal) * 100
+		progress := &models.ProgressInfo{
+			RawPercent: rawPercent,
+		}
+
+		if rawPercent > 100 {
+			progress.Percent = 100
+			progress.Status = "superado"
+			progress.ExcessAmount = updatedTargetBolsa.CurrentValue - updatedTargetBolsa.Goal
+			progress.ExcessPercent = rawPercent - 100
+		} else if rawPercent == 100 {
+			progress.Percent = 100
+			progress.Status = "completado"
+		} else {
+			progress.Percent = rawPercent
+			progress.Status = "pendiente"
+		}
+
+		updatedTargetBolsa.Progress = progress
+	}
+
+	// Preparar la respuesta
+	response := gin.H{
+		"message":            "Transferencia completada exitosamente",
+		"source_bolsa":       updatedSourceBolsa,
+		"target_bolsa":       updatedTargetBolsa,
+		"transferred_assets": transferredAssets,
+		"transferred_amount": excessAmount,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
