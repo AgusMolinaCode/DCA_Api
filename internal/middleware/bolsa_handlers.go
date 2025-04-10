@@ -98,8 +98,36 @@ func GetBolsaDetails(c *gin.Context) {
 
 	// Verificar que la bolsa pertenece al usuario
 	if bolsa.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no tienes permiso para acceder a esta bolsa."})
+		c.JSON(http.StatusForbidden, gin.H{"error": "no tienes permiso para acceder a esta bolsa"})
 		return
+	}
+
+	// Calcular información de progreso si hay un objetivo establecido
+	if bolsa.Goal > 0 {
+		// Calcular el porcentaje real de progreso
+		rawPercent := (bolsa.CurrentValue / bolsa.Goal) * 100
+
+		// Crear objeto de progreso
+		progress := &models.ProgressInfo{
+			RawPercent: rawPercent,
+		}
+
+		// Limitar el porcentaje mostrado a 100% si se superó el objetivo
+		if rawPercent > 100 {
+			progress.Percent = 100
+			progress.Status = "superado"
+			progress.ExcessAmount = bolsa.CurrentValue - bolsa.Goal
+			progress.ExcessPercent = rawPercent - 100
+		} else if rawPercent == 100 {
+			progress.Percent = 100
+			progress.Status = "completado"
+		} else {
+			progress.Percent = rawPercent
+			progress.Status = "pendiente"
+		}
+
+		// Asignar el progreso a la bolsa
+		bolsa.Progress = progress
 	}
 
 	c.JSON(http.StatusOK, gin.H{"bolsa": bolsa})

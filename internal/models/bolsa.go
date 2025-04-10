@@ -11,6 +11,15 @@ const (
 	TriggerTypeValueReached = "value_reached"
 )
 
+// ProgressInfo contiene información sobre el progreso hacia el objetivo de una bolsa
+type ProgressInfo struct {
+	Percent       float64 `json:"percent"`                  // Porcentaje de progreso (0-100)
+	RawPercent    float64 `json:"raw_percent"`              // Porcentaje real sin limitar a 100%
+	Status        string  `json:"status"`                   // "pendiente", "completado", "superado"
+	ExcessAmount  float64 `json:"excess_amount,omitempty"`  // Cantidad que excede el objetivo
+	ExcessPercent float64 `json:"excess_percent,omitempty"` // Porcentaje que excede el objetivo
+}
+
 // Bolsa representa una subcartera con un objetivo específico
 type Bolsa struct {
 	ID           string         `json:"id"`
@@ -18,7 +27,8 @@ type Bolsa struct {
 	Name         string         `json:"name" binding:"required"`
 	Description  string         `json:"description"`
 	Goal         float64        `json:"goal"`
-	CurrentValue float64        `json:"current_value"` // Campo calculado, no almacenado
+	CurrentValue float64        `json:"current_value"`      // Campo calculado, no almacenado
+	Progress     *ProgressInfo  `json:"progress,omitempty"` // Información de progreso hacia el objetivo
 	Assets       []AssetInBolsa `json:"assets,omitempty"`
 	Rules        []TriggerRule  `json:"rules,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`
