@@ -619,3 +619,48 @@ func (r *BolsaRepository) getRulesForBolsa(bolsaID string) ([]models.TriggerRule
 
 	return rules, nil
 }
+
+// getAssetsForBolsa obtiene todos los activos de una bolsa
+func (r *BolsaRepository) getAssetsForBolsa(bolsaID string) ([]models.AssetInBolsa, error) {
+	rows, err := r.db.Query(
+		`SELECT id, bolsa_id, crypto_name, ticker, amount, purchase_price, total, image_url, created_at, updated_at 
+		FROM assets_in_bolsa WHERE bolsa_id = ?`, bolsaID,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var assets []models.AssetInBolsa
+	for rows.Next() {
+		var asset models.AssetInBolsa
+		err := rows.Scan(
+			&asset.ID, &asset.BolsaID, &asset.CryptoName, &asset.Ticker, &asset.Amount,
+			&asset.PurchasePrice, &asset.Total, &asset.ImageURL, &asset.CreatedAt, &asset.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Obtener precio actual y calcular valores
+		cryptoData, err := services.GetCryptoPrice(asset.Ticker)
+		if err != nil {
+			// Si no podemos obtener el precio actual, usamos el precio de compra
+			asset.CurrentPrice = asset.PurchasePrice
+		} else {
+			asset.CurrentPrice = cryptoData.Raw[asset.Ticker]["USD"].PRICE
+		}
+
+		asset.CurrentValue = asset.Amount * asset.CurrentPrice
+		asset.GainLoss = asset.CurrentValue - asset.Total
+
+		if asset.Total > 0 {
+			asset.GainLossPercent = (asset.GainLoss / asset.Total) * 100
+		}
+
+		assets = append(assets, asset)
+	}
+
+	return assets, nil
+}
