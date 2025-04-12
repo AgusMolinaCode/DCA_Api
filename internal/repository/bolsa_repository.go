@@ -446,3 +446,176 @@ func (r *BolsaRepository) UpdateAsset(asset models.AssetInBolsa) error {
 
 	return err
 }
+
+// AddTagToBolsa añade una etiqueta a una bolsa
+func (r *BolsaRepository) AddTagToBolsa(bolsaID string, tag string) error {
+	// Iniciar transacción SQL
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	// Generar ID único para la etiqueta
+	tagID := models.GenerateUUID()
+
+	// Insertar la etiqueta en la base de datos
+	_, err = tx.Exec(
+		"INSERT INTO bolsa_tags (id, bolsa_id, tag) VALUES (?, ?, ?)",
+		tagID, bolsaID, tag,
+	)
+
+	return err
+}
+
+// RemoveTagFromBolsa elimina una etiqueta de una bolsa
+func (r *BolsaRepository) RemoveTagFromBolsa(bolsaID string, tag string) error {
+	// Iniciar transacción SQL
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	// Eliminar la etiqueta de la base de datos
+	_, err = tx.Exec(
+		"DELETE FROM bolsa_tags WHERE bolsa_id = ? AND tag = ?",
+		bolsaID, tag,
+	)
+
+	return err
+}
+
+// GetBolsasByTag obtiene todas las bolsas que tienen una etiqueta específica
+func (r *BolsaRepository) GetBolsasByTag(userID string, tag string) ([]models.Bolsa, error) {
+	rows, err := r.db.Query(
+		`SELECT DISTINCT b.* FROM bolsas b 
+		JOIN bolsa_tags t ON b.id = t.bolsa_id 
+		WHERE b.user_id = ? AND t.tag = ?`,
+		userID, tag,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bolsas []models.Bolsa
+
+	for rows.Next() {
+		var bolsa models.Bolsa
+		err := rows.Scan(
+			&bolsa.ID,
+			&bolsa.UserID,
+			&bolsa.Name,
+			&bolsa.Description,
+			&bolsa.Goal,
+			&bolsa.CreatedAt,
+			&bolsa.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Obtener los activos de la bolsa
+		assets, err := r.getAssetsForBolsa(bolsa.ID)
+		if err != nil {
+			return nil, err
+		}
+		bolsa.Assets = assets
+
+		// Calcular el valor actual de la bolsa
+		bolsa.CurrentValue = 0
+		for _, asset := range assets {
+			bolsa.CurrentValue += asset.CurrentValue
+		}
+
+		// Obtener las etiquetas de la bolsa
+		tags, err := r.getTagsForBolsa(bolsa.ID)
+		if err != nil {
+			return nil, err
+		}
+		bolsa.Tags = tags
+
+		// Obtener las reglas de la bolsa
+		rules, err := r.getRulesForBolsa(bolsa.ID)
+		if err != nil {
+			return nil, err
+		}
+		bolsa.Rules = rules
+
+		bolsas = append(bolsas, bolsa)
+	}
+
+	return bolsas, nil
+}
+
+// getTagsForBolsa obtiene todas las etiquetas de una bolsa
+func (r *BolsaRepository) getTagsForBolsa(bolsaID string) ([]string, error) {
+	rows, err := r.db.Query(
+		"SELECT tag FROM bolsa_tags WHERE bolsa_id = ?",
+		bolsaID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tags []string
+
+	for rows.Next() {
+		var tag string
+		err := rows.Scan(&tag)
+		if err != nil {
+			return nil, err
+		}
+		tags = append(tags, tag)
+	}
+
+	return tags, nil
+}
+
+// getRulesForBolsa obtiene todas las reglas de una bolsa
+func (r *BolsaRepository) getRulesForBolsa(bolsaID string) ([]models.TriggerRule, error) {
+	rows, err := r.db.Query(
+		`SELECT id, bolsa_id, type, ticker, target_value, active, triggered, created_at, updated_at 
+		FROM trigger_rules WHERE bolsa_id = ?`, bolsaID,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []models.TriggerRule
+	for rows.Next() {
+		var rule models.TriggerRule
+		var active, triggered int
+		err := rows.Scan(
+			&rule.ID, &rule.BolsaID, &rule.Type, &rule.Ticker, &rule.TargetValue,
+			&active, &triggered, &rule.CreatedAt, &rule.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convertir enteros a booleanos
+		rule.Active = active == 1
+		rule.Triggered = triggered == 1
+
+		rules = append(rules, rule)
+	}
+
+	return rules, nil
+}

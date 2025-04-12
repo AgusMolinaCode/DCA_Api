@@ -56,6 +56,10 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.PUT("/bolsas/:id", middleware.UpdateBolsa)
 		protected.POST("/bolsas/:id/complete", middleware.CompleteBolsaAndTransfer)
 
+		// Rutas para etiquetas de bolsas
+		protected.POST("/bolsas/:id/tags", middleware.ManageBolsaTags)
+		protected.GET("/bolsas/tags/:tag", middleware.GetBolsasByTag)
+
 	}
 
 	// Configurar opciones para rutas de administración

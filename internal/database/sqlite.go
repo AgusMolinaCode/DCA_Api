@@ -116,5 +116,20 @@ func InitDB() error {
 	);`
 
 	_, err = DB.Exec(createTriggerRulesTableSQL)
+	if err != nil {
+		return err
+	}
+
+	// Crear tabla de etiquetas
+	createBolsaTagsTableSQL := `
+	CREATE TABLE IF NOT EXISTS bolsa_tags (
+		id TEXT PRIMARY KEY,
+		bolsa_id TEXT NOT NULL,
+		tag TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(bolsa_id) REFERENCES bolsas(id) ON DELETE CASCADE
+	);`
+
+	_, err = DB.Exec(createBolsaTagsTableSQL)
 	return err
 }

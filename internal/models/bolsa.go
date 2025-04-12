@@ -20,7 +20,7 @@ type ProgressInfo struct {
 	ExcessPercent float64 `json:"excess_percent,omitempty"` // Porcentaje que excede el objetivo
 }
 
-// Bolsa representa una subcartera con un objetivo específico
+// Bolsa representa una sub-cartera con un objetivo específico
 type Bolsa struct {
 	ID           string         `json:"id"`
 	UserID       string         `json:"user_id"`
@@ -29,6 +29,7 @@ type Bolsa struct {
 	Goal         float64        `json:"goal"`
 	CurrentValue float64        `json:"current_value"`      // Campo calculado, no almacenado
 	Progress     *ProgressInfo  `json:"progress,omitempty"` // Información de progreso hacia el objetivo
+	Tags         []string       `json:"tags,omitempty"`
 	Assets       []AssetInBolsa `json:"assets,omitempty"`
 	Rules        []TriggerRule  `json:"rules,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`

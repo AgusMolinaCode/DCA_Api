@@ -651,3 +651,139 @@ func CompleteBolsaAndTransfer(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+// ManageBolsaTags gestiona las etiquetas de una bolsa (añadir o eliminar)
+func ManageBolsaTags(c *gin.Context) {
+	// Obtener el ID de la bolsa de los parámetros de la URL
+	bolsaID := c.Param("id")
+	if bolsaID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID de bolsa no proporcionado"})
+		return
+	}
+
+	// Obtener el ID del usuario del contexto
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
+		return
+	}
+
+	// Obtener la bolsa actual para verificar que pertenece al usuario
+	bolsaRepo := repository.NewBolsaRepository(database.DB)
+	existingBolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Bolsa no encontrada"})
+		return
+	}
+
+	// Verificar que la bolsa pertenece al usuario
+	if existingBolsa.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para acceder a esta bolsa"})
+		return
+	}
+
+	// Parsear los datos de la solicitud
+	var request struct {
+		Action string   `json:"action" binding:"required,oneof=add remove"`
+		Tags   []string `json:"tags" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Procesar las etiquetas según la acción
+	switch request.Action {
+	case "add":
+		// Añadir etiquetas
+		for _, tag := range request.Tags {
+			err := bolsaRepo.AddTagToBolsa(bolsaID, tag)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al añadir etiqueta: " + tag})
+				return
+			}
+		}
+	case "remove":
+		// Eliminar etiquetas
+		for _, tag := range request.Tags {
+			err := bolsaRepo.RemoveTagFromBolsa(bolsaID, tag)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al eliminar etiqueta: " + tag})
+				return
+			}
+		}
+	}
+
+	// Obtener la bolsa actualizada
+	updatedBolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener la bolsa actualizada"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Etiquetas actualizadas correctamente",
+		"bolsa":   updatedBolsa,
+	})
+}
+
+// GetBolsasByTag obtiene todas las bolsas que tienen una etiqueta específica
+func GetBolsasByTag(c *gin.Context) {
+	// Obtener la etiqueta de los parámetros de la URL
+	tag := c.Param("tag")
+	if tag == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Etiqueta no proporcionada"})
+		return
+	}
+
+	// Obtener el ID del usuario del contexto
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
+		return
+	}
+
+	// Obtener las bolsas con la etiqueta especificada
+	bolsaRepo := repository.NewBolsaRepository(database.DB)
+	bolsas, err := bolsaRepo.GetBolsasByTag(userID, tag)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener bolsas por etiqueta"})
+		return
+	}
+
+	// Calcular información de progreso para cada bolsa
+	for i := range bolsas {
+		if bolsas[i].Goal > 0 {
+			// Calcular el porcentaje real de progreso
+			rawPercent := (bolsas[i].CurrentValue / bolsas[i].Goal) * 100
+
+			// Crear objeto de progreso
+			progress := &models.ProgressInfo{
+				RawPercent: rawPercent,
+			}
+
+			// Limitar el porcentaje mostrado a 100% si se superó el objetivo
+			if rawPercent > 100 {
+				progress.Percent = 100
+				progress.Status = "superado"
+				progress.ExcessAmount = bolsas[i].CurrentValue - bolsas[i].Goal
+				progress.ExcessPercent = rawPercent - 100
+			} else if rawPercent == 100 {
+				progress.Percent = 100
+				progress.Status = "completado"
+			} else {
+				progress.Percent = rawPercent
+				progress.Status = "pendiente"
+			}
+
+			// Asignar el progreso a la bolsa
+			bolsas[i].Progress = progress
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"tag":    tag,
+		"bolsas": bolsas,
+	})
+}
