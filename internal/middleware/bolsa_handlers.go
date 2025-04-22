@@ -733,7 +733,7 @@ func GetBolsasByTag(c *gin.Context) {
 	// Obtener la etiqueta de los parámetros de la URL
 	tag := c.Param("tag")
 	if tag == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Etiqueta no proporcionada"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Etiqueta no proporcionada."})
 		return
 	}
 
