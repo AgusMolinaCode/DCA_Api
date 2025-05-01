@@ -718,7 +718,7 @@ func ManageBolsaTags(c *gin.Context) {
 	// Obtener la bolsa actualizada
 	updatedBolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener la bolsa actualizada"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener la bolsa actualizada."})
 		return
 	}
 
