@@ -402,3 +402,16 @@ func DeleteTransactionsByTicker(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Todas las transacciones de %s han sido eliminadas exitosamente", ticker)})
 }
+
+// GetInvestmentHistory obtiene el historial diario del valor total de las inversiones
+func GetInvestmentHistory(c *gin.Context) {
+	userID := c.GetString("userId")
+
+	history, err := cryptoRepo.GetInvestmentHistory(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener el historial de inversiones"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"investment_history": history})
+}

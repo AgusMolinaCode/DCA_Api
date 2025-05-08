@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 type CryptoDashboard struct {
 	Ticker        string  `json:"ticker"`
 	CryptoName    string  `json:"crypto_name"` // Nuevo campo para el nombre de la criptomoneda
@@ -10,4 +12,18 @@ type CryptoDashboard struct {
 	CurrentPrice  float64 `json:"current_price"`
 	CurrentProfit float64 `json:"current_profit"`
 	ProfitPercent float64 `json:"profit_percent"`
+}
+
+// DailyValue representa el valor total de las inversiones en un día específico
+type DailyValue struct {
+	Date             string  `json:"date"`
+	TotalValue       float64 `json:"total_value"`
+	ChangePercentage float64 `json:"change_percentage"`
+}
+
+// InvestmentHistory representa el historial de inversiones a lo largo del tiempo
+type InvestmentHistory struct {
+	StartDate       time.Time    `json:"start_date"`
+	History         []DailyValue `json:"history"`
+	TrendPercentage float64      `json:"trend_percentage"`
 }

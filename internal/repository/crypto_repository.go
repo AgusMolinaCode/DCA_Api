@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/models"
@@ -898,4 +899,115 @@ func (r *CryptoRepository) getAveragePurchasePrice(userID string, ticker string,
 	}
 
 	return avgPrice, nil
+}
+
+func (r *CryptoRepository) GetInvestmentHistory(userID string) (models.InvestmentHistory, error) {
+	// Obtener todas las transacciones del usuario ordenadas por fecha
+	query := `
+		SELECT id, ticker, crypto_name, amount, purchase_price, total, type, date
+		FROM crypto_transactions
+		WHERE user_id = ?
+		ORDER BY date ASC`
+
+	rows, err := r.db.Query(query, userID)
+	if err != nil {
+		return models.InvestmentHistory{}, err
+	}
+	defer rows.Close()
+
+	// Mapa para acumular datos por día
+	dailyValues := make(map[string]*models.DailyValue)
+
+	// Variables para seguimiento
+	// var previousTotalValue float64 = 0
+	var firstDate time.Time
+
+	// Mapa para mantener las tenencias actuales por ticker
+	holdings := make(map[string]float64)
+
+	// Procesar cada transacción cronológicamente
+	for rows.Next() {
+		var id, ticker, cryptoName, txType string
+		var amount, purchasePrice, total float64
+		var date time.Time
+
+		err := rows.Scan(&id, &ticker, &cryptoName, &amount, &purchasePrice, &total, &txType, &date)
+		if err != nil {
+			return models.InvestmentHistory{}, err
+		}
+
+		// Actualizar las tenencias según el tipo de transacción
+		if txType == models.TransactionTypeBuy {
+			holdings[ticker] += amount
+		} else if txType == models.TransactionTypeSell {
+			holdings[ticker] -= amount
+		}
+
+		// Formato de fecha como string (YYYY-MM-DD)
+		dateStr := date.Format("2006-01-02")
+
+		// Inicializar el valor diario si no existe
+		if _, exists := dailyValues[dateStr]; !exists {
+			dailyValues[dateStr] = &models.DailyValue{
+				Date:       dateStr,
+				TotalValue: 0,
+			}
+		}
+
+		// Actualizar el valor diario según el tipo de transacción
+		if txType == models.TransactionTypeBuy {
+			dailyValues[dateStr].TotalValue += total
+		} else if txType == models.TransactionTypeSell {
+			// Para ventas, no restamos el total, ya que queremos mantener el valor de la inversión
+			// Solo actualizamos las tenencias
+		}
+
+		// Actualizar la fecha inicial
+		if firstDate.IsZero() {
+			firstDate = date
+		}
+	}
+
+	// Convertir el mapa a un slice y ordenar por fecha
+	history := make([]models.DailyValue, 0, len(dailyValues))
+	for _, value := range dailyValues {
+		history = append(history, *value)
+	}
+
+	// Ordenar el historial por fecha
+	sort.Slice(history, func(i, j int) bool {
+		return history[i].Date < history[j].Date
+	})
+
+	// Calcular el valor acumulado y el porcentaje de cambio
+	var runningTotal float64 = 0
+	for i := 0; i < len(history); i++ {
+		// Acumular el valor total
+		runningTotal += history[i].TotalValue
+		history[i].TotalValue = runningTotal
+
+		// Calcular el porcentaje de cambio
+		if i > 0 && history[i-1].TotalValue > 0 {
+			history[i].ChangePercentage = ((history[i].TotalValue - history[i-1].TotalValue) / history[i-1].TotalValue) * 100
+		} else {
+			history[i].ChangePercentage = 0
+		}
+	}
+
+	// Calcular el porcentaje de tendencia general (desde el inicio hasta el final)
+	var trendPercentage float64 = 0
+	if len(history) > 1 && history[0].TotalValue > 0 {
+		firstValue := history[0].TotalValue
+		lastValue := history[len(history)-1].TotalValue
+		trendPercentage = ((lastValue - firstValue) / firstValue) * 100
+	}
+
+	// Crear el objeto de historial de inversión
+	investmentHistory := models.InvestmentHistory{
+		StartDate:       firstDate,
+		History:         history,
+		TrendPercentage: trendPercentage,
+	}
+
+	return investmentHistory, nil
 }
