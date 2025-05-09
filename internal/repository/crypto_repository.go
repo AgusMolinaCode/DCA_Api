@@ -697,7 +697,7 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 				// Si hay un error o el precio promedio es 0, usar el precio de compra de la transacción
 				avgPrice = tx.PurchasePrice
 			}
-			costBasis := avgPrice * tx.Amount
+			// costBasis := avgPrice * tx.Amount
 
 			// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
 			if tx.USDTReceived > 0 {
@@ -709,12 +709,12 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 			// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
 			details.CurrentValue = tx.Amount * tx.PurchasePrice
 
-			// La ganancia/pérdida es lo que se recibió menos lo que costó
-			details.GainLoss = tx.Total - costBasis
+			// La ganancia/pérdida es lo que se recibió menos lo que valdría ahora
+			details.GainLoss = tx.Total - details.CurrentValue
 
 			// Calcular el porcentaje de ganancia/pérdida
-			if costBasis > 0 {
-				details.GainLossPercent = (details.GainLoss / costBasis) * 100
+			if details.CurrentValue > 0 {
+				details.GainLossPercent = (details.GainLoss / details.CurrentValue) * 100
 			}
 		} else {
 			details.CurrentValue = tx.Amount * tx.PurchasePrice
@@ -915,17 +915,20 @@ func (r *CryptoRepository) GetInvestmentHistory(userID string) (models.Investmen
 	}
 	defer rows.Close()
 
-	// Mapa para acumular datos por día
-	dailyValues := make(map[string]*models.DailyValue)
+	// Estructura para almacenar transacciones por día
+	type DailyTransactions struct {
+		Buys  float64
+		Sells float64
+	}
+
+	// Mapa para acumular transacciones por día
+	dailyTxs := make(map[string]*DailyTransactions)
 
 	// Variables para seguimiento
-	// var previousTotalValue float64 = 0
 	var firstDate time.Time
+	var allDates []string
 
-	// Mapa para mantener las tenencias actuales por ticker
-	holdings := make(map[string]float64)
-
-	// Procesar cada transacción cronológicamente
+	// Procesar cada transacción cronológicamente para agruparlas por día
 	for rows.Next() {
 		var id, ticker, cryptoName, txType string
 		var amount, purchasePrice, total float64
@@ -936,30 +939,34 @@ func (r *CryptoRepository) GetInvestmentHistory(userID string) (models.Investmen
 			return models.InvestmentHistory{}, err
 		}
 
-		// Actualizar las tenencias según el tipo de transacción
-		if txType == models.TransactionTypeBuy {
-			holdings[ticker] += amount
-		} else if txType == models.TransactionTypeSell {
-			holdings[ticker] -= amount
-		}
-
 		// Formato de fecha como string (YYYY-MM-DD)
 		dateStr := date.Format("2006-01-02")
 
-		// Inicializar el valor diario si no existe
-		if _, exists := dailyValues[dateStr]; !exists {
-			dailyValues[dateStr] = &models.DailyValue{
-				Date:       dateStr,
-				TotalValue: 0,
+		// Agregar la fecha al slice si no existe
+		dateExists := false
+		for _, d := range allDates {
+			if d == dateStr {
+				dateExists = true
+				break
+			}
+		}
+		if !dateExists {
+			allDates = append(allDates, dateStr)
+		}
+
+		// Inicializar el registro diario si no existe
+		if _, exists := dailyTxs[dateStr]; !exists {
+			dailyTxs[dateStr] = &DailyTransactions{
+				Buys:  0,
+				Sells: 0,
 			}
 		}
 
-		// Actualizar el valor diario según el tipo de transacción
+		// Actualizar compras o ventas según el tipo de transacción
 		if txType == models.TransactionTypeBuy {
-			dailyValues[dateStr].TotalValue += total
+			dailyTxs[dateStr].Buys += total
 		} else if txType == models.TransactionTypeSell {
-			// Para ventas, no restamos el total, ya que queremos mantener el valor de la inversión
-			// Solo actualizamos las tenencias
+			dailyTxs[dateStr].Sells += total
 		}
 
 		// Actualizar la fecha inicial
@@ -968,30 +975,39 @@ func (r *CryptoRepository) GetInvestmentHistory(userID string) (models.Investmen
 		}
 	}
 
-	// Convertir el mapa a un slice y ordenar por fecha
-	history := make([]models.DailyValue, 0, len(dailyValues))
-	for _, value := range dailyValues {
-		history = append(history, *value)
-	}
+	// Ordenar las fechas cronológicamente
+	sort.Strings(allDates)
 
-	// Ordenar el historial por fecha
-	sort.Slice(history, func(i, j int) bool {
-		return history[i].Date < history[j].Date
-	})
-
-	// Calcular el valor acumulado y el porcentaje de cambio
+	// Crear el historial de valores diarios
+	history := make([]models.DailyValue, 0, len(allDates))
 	var runningTotal float64 = 0
-	for i := 0; i < len(history); i++ {
-		// Acumular el valor total
-		runningTotal += history[i].TotalValue
-		history[i].TotalValue = runningTotal
+
+	// Procesar cada día en orden cronológico
+	for i, dateStr := range allDates {
+		// Obtener las transacciones del día
+		txs := dailyTxs[dateStr]
+
+		// Calcular el valor neto del día (compras - ventas)
+		dailyNetValue := txs.Buys - txs.Sells
+
+		// Actualizar el total acumulado
+		runningTotal += dailyNetValue
+
+		// Crear el valor diario
+		dailyValue := models.DailyValue{
+			Date:       dateStr,
+			TotalValue: runningTotal,
+		}
 
 		// Calcular el porcentaje de cambio
 		if i > 0 && history[i-1].TotalValue > 0 {
-			history[i].ChangePercentage = ((history[i].TotalValue - history[i-1].TotalValue) / history[i-1].TotalValue) * 100
+			dailyValue.ChangePercentage = ((dailyValue.TotalValue - history[i-1].TotalValue) / history[i-1].TotalValue) * 100
 		} else {
-			history[i].ChangePercentage = 0
+			dailyValue.ChangePercentage = 0
 		}
+
+		// Agregar al historial
+		history = append(history, dailyValue)
 	}
 
 	// Calcular el porcentaje de tendencia general (desde el inicio hasta el final)
@@ -1005,6 +1021,210 @@ func (r *CryptoRepository) GetInvestmentHistory(userID string) (models.Investmen
 	// Crear el objeto de historial de inversión
 	investmentHistory := models.InvestmentHistory{
 		StartDate:       firstDate,
+		History:         history,
+		TrendPercentage: trendPercentage,
+	}
+
+	return investmentHistory, nil
+}
+
+func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, totalInvested, profit, profitPercentage float64) error {
+	// Verificar que los valores sean válidos
+	if totalValue <= 0 || totalInvested <= 0 {
+		log.Printf("No se guardó el snapshot porque los valores no son válidos: totalValue=%f, totalInvested=%f", totalValue, totalInvested)
+		return nil // No guardamos snapshots con valores inválidos
+	}
+
+	// Obtener la fecha actual
+	currentTime := time.Now()
+
+	// Verificar si ya existe un snapshot para el día actual
+	currentDateStr := currentTime.Format("2006-01-02")
+
+	// Consultar si existe un snapshot para la fecha actual
+	query := `
+		SELECT id FROM investment_snapshots 
+		WHERE user_id = ? AND date(date) = date(?)
+		ORDER BY date DESC LIMIT 1
+	`
+
+	var existingID string
+	err := r.db.QueryRow(query, userID, currentTime).Scan(&existingID)
+
+	// Si existe un snapshot para hoy, actualizarlo en lugar de crear uno nuevo
+	if err == nil {
+		log.Printf("Ya existe un snapshot para hoy (%s) con ID %s, actualizándolo", currentDateStr, existingID)
+
+		updateQuery := `
+			UPDATE investment_snapshots 
+			SET total_value = ?, total_invested = ?, profit = ?, profit_percentage = ?, date = ?
+			WHERE id = ?
+		`
+
+		_, err := r.db.Exec(
+			updateQuery,
+			totalValue,
+			totalInvested,
+			profit,
+			profitPercentage,
+			currentTime,
+			existingID,
+		)
+
+		if err != nil {
+			log.Printf("Error al actualizar snapshot existente: %v", err)
+			return err
+		}
+
+		log.Printf("Snapshot actualizado exitosamente para la fecha %s", currentDateStr)
+		return nil
+	}
+
+	// Si no existe un snapshot para hoy o hubo un error, crear uno nuevo
+	// Generar un ID único para el snapshot
+	id := fmt.Sprintf("snapshot_%d", time.Now().UnixNano())
+
+	// Registrar los valores que se van a guardar
+	log.Printf("Guardando nuevo snapshot para usuario %s en fecha %s: totalValue=%f, totalInvested=%f, profit=%f, profitPercentage=%f",
+		userID, currentDateStr, totalValue, totalInvested, profit, profitPercentage)
+
+	// Insertar el snapshot en la base de datos
+	insertQuery := `
+		INSERT INTO investment_snapshots (
+			id, user_id, date, total_value, total_invested, profit, profit_percentage
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err = r.db.Exec(
+		insertQuery,
+		id,
+		userID,
+		currentTime,
+		totalValue,
+		totalInvested,
+		profit,
+		profitPercentage,
+	)
+
+	if err != nil {
+		log.Printf("Error al guardar nuevo snapshot: %v", err)
+	} else {
+		log.Printf("Nuevo snapshot guardado exitosamente con ID: %s para la fecha %s", id, currentDateStr)
+	}
+
+	return err
+}
+
+func (r *CryptoRepository) GetInvestmentSnapshots(userID string) ([]models.InvestmentSnapshot, error) {
+	// Consultar los snapshots ordenados por fecha
+	query := `
+		SELECT id, user_id, date, total_value, total_invested, profit, profit_percentage
+		FROM investment_snapshots
+		WHERE user_id = ?
+		ORDER BY date ASC
+	`
+
+	rows, err := r.db.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Procesar los resultados
+	snapshots := []models.InvestmentSnapshot{}
+	for rows.Next() {
+		var snapshot models.InvestmentSnapshot
+		err := rows.Scan(
+			&snapshot.ID,
+			&snapshot.UserID,
+			&snapshot.Date,
+			&snapshot.TotalValue,
+			&snapshot.TotalInvested,
+			&snapshot.Profit,
+			&snapshot.ProfitPercentage,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		snapshots = append(snapshots, snapshot)
+	}
+
+	return snapshots, nil
+}
+
+func (r *CryptoRepository) GetInvestmentHistoryFromSnapshots(userID string) (models.InvestmentHistory, error) {
+	// Obtener todos los snapshots del usuario
+	snapshots, err := r.GetInvestmentSnapshots(userID)
+	if err != nil {
+		return models.InvestmentHistory{}, err
+	}
+
+	// Si no hay snapshots, devolver un historial vacío
+	if len(snapshots) == 0 {
+		return models.InvestmentHistory{
+			StartDate:       time.Now(),
+			History:         []models.DailyValue{},
+			TrendPercentage: 0,
+		}, nil
+	}
+
+	// Agrupar snapshots por día (usando solo el más reciente de cada día)
+	dailySnapshots := make(map[string]models.InvestmentSnapshot)
+	var allDates []string
+
+	for _, snapshot := range snapshots {
+		dateStr := snapshot.Date.Format("2006-01-02")
+
+		// Si ya existe un snapshot para este día, solo actualizar si este es más reciente
+		if existing, exists := dailySnapshots[dateStr]; exists {
+			if snapshot.Date.After(existing.Date) {
+				dailySnapshots[dateStr] = snapshot
+			}
+		} else {
+			dailySnapshots[dateStr] = snapshot
+			allDates = append(allDates, dateStr)
+		}
+	}
+
+	// Ordenar las fechas
+	sort.Strings(allDates)
+
+	// Crear el historial de valores diarios
+	history := make([]models.DailyValue, 0, len(allDates))
+
+	// Procesar cada día en orden cronológico
+	for i, dateStr := range allDates {
+		snapshot := dailySnapshots[dateStr]
+
+		// Crear el valor diario
+		dailyValue := models.DailyValue{
+			Date:       dateStr,
+			TotalValue: snapshot.TotalValue,
+		}
+
+		// Calcular el porcentaje de cambio
+		if i > 0 && history[i-1].TotalValue > 0 {
+			dailyValue.ChangePercentage = ((dailyValue.TotalValue - history[i-1].TotalValue) / history[i-1].TotalValue) * 100
+		} else {
+			dailyValue.ChangePercentage = 0
+		}
+
+		// Agregar al historial
+		history = append(history, dailyValue)
+	}
+
+	// Calcular el porcentaje de tendencia general (desde el inicio hasta el final)
+	var trendPercentage float64 = 0
+	if len(history) > 1 && history[0].TotalValue > 0 {
+		firstValue := history[0].TotalValue
+		lastValue := history[len(history)-1].TotalValue
+		trendPercentage = ((lastValue - firstValue) / firstValue) * 100
+	}
+
+	// Crear el objeto de historial de inversión
+	investmentHistory := models.InvestmentHistory{
+		StartDate:       snapshots[0].Date,
 		History:         history,
 		TrendPercentage: trendPercentage,
 	}

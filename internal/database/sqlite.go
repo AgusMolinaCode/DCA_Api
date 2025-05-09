@@ -120,16 +120,50 @@ func InitDB() error {
 		return err
 	}
 
-	// Crear tabla de etiquetas
+	// Crear tabla de etiquetas para bolsas
 	createBolsaTagsTableSQL := `
 	CREATE TABLE IF NOT EXISTS bolsa_tags (
 		id TEXT PRIMARY KEY,
 		bolsa_id TEXT NOT NULL,
 		tag TEXT NOT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(bolsa_id, tag),
 		FOREIGN KEY(bolsa_id) REFERENCES bolsas(id) ON DELETE CASCADE
 	);`
 
 	_, err = DB.Exec(createBolsaTagsTableSQL)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Crear tabla para almacenar el historial de inversiones
+	createInvestmentHistoryTableSQL := `
+	CREATE TABLE IF NOT EXISTS investment_snapshots (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		date DATETIME NOT NULL,
+		total_value REAL NOT NULL,
+		total_invested REAL NOT NULL,
+		profit REAL NOT NULL,
+		profit_percentage REAL NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);`
+
+	_, err = DB.Exec(createInvestmentHistoryTableSQL)
+	if err != nil {
+		return err
+	}
+
+	// Crear índice para búsqueda rápida por usuario y fecha
+	createInvestmentHistoryIndexSQL := `
+	CREATE INDEX IF NOT EXISTS idx_investment_snapshots_user_date 
+	ON investment_snapshots(user_id, date);`
+
+	_, err = DB.Exec(createInvestmentHistoryIndexSQL)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

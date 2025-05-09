@@ -403,14 +403,158 @@ func DeleteTransactionsByTicker(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Todas las transacciones de %s han sido eliminadas exitosamente", ticker)})
 }
 
+// ForceCreateSnapshot fuerza la creación de un snapshot del valor actual de las inversiones
+func ForceCreateSnapshot(c *gin.Context) {
+	userID := c.GetString("userId")
+
+	// Crear un repositorio de tenencias
+	holdingsRepo := repository.NewHoldingsRepository(database.DB)
+
+	// Obtener las tenencias
+	holdings, err := holdingsRepo.GetHoldings(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener el balance actual"})
+		return
+	}
+
+	// Guardar un snapshot del valor actual de las inversiones
+	log.Printf("Forzando la creación de un snapshot para usuario %s", userID)
+	err = cryptoRepo.SaveInvestmentSnapshot(
+		userID,
+		holdings.TotalCurrentValue,
+		holdings.TotalInvested,
+		holdings.TotalProfit,
+		holdings.ProfitPercentage,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al crear snapshot: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Snapshot creado exitosamente"})
+}
+
+// ForceCreateSnapshotWithDate fuerza la creación de un snapshot con una fecha específica (para pruebas)
+func ForceCreateSnapshotWithDate(c *gin.Context) {
+	userID := c.GetString("userId")
+
+	// Obtener parámetros de la solicitud
+	var request struct {
+		Date             string  `json:"date"` // Formato: "2025-05-10"
+		TotalValue       float64 `json:"total_value"`
+		TotalInvested    float64 `json:"total_invested"`
+		Profit           float64 `json:"profit"`
+		ProfitPercentage float64 `json:"profit_percentage"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		// Si no se proporcionaron datos, usar valores predeterminados
+		// Crear un repositorio de tenencias
+		holdingsRepo := repository.NewHoldingsRepository(database.DB)
+
+		// Obtener las tenencias
+		holdings, err := holdingsRepo.GetHoldings(userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener el balance actual"})
+			return
+		}
+
+		// Usar valores actuales
+		request.TotalValue = holdings.TotalCurrentValue
+		request.TotalInvested = holdings.TotalInvested
+		request.Profit = holdings.TotalProfit
+		request.ProfitPercentage = holdings.ProfitPercentage
+
+		// Usar fecha de mañana por defecto
+		tomorrow := time.Now().AddDate(0, 0, 1)
+		request.Date = tomorrow.Format("2006-01-02")
+	}
+
+	// Parsear la fecha
+	testDate, err := time.Parse("2006-01-02", request.Date)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato de fecha inválido. Use YYYY-MM-DD"})
+		return
+	}
+
+	// Generar un ID único para el snapshot
+	id := fmt.Sprintf("snapshot_%d", time.Now().UnixNano())
+
+	// Insertar directamente en la base de datos
+	query := `
+		INSERT INTO investment_snapshots (
+			id, user_id, date, total_value, total_invested, profit, profit_percentage
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err = database.DB.Exec(
+		query,
+		id,
+		userID,
+		testDate,
+		request.TotalValue,
+		request.TotalInvested,
+		request.Profit,
+		request.ProfitPercentage,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al crear snapshot: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("Snapshot creado exitosamente para la fecha %s", request.Date),
+		"snapshot": map[string]interface{}{
+			"id":                id,
+			"date":              testDate,
+			"total_value":       request.TotalValue,
+			"total_invested":    request.TotalInvested,
+			"profit":            request.Profit,
+			"profit_percentage": request.ProfitPercentage,
+		},
+	})
+}
+
 // GetInvestmentHistory obtiene el historial diario del valor total de las inversiones
 func GetInvestmentHistory(c *gin.Context) {
 	userID := c.GetString("userId")
 
-	history, err := cryptoRepo.GetInvestmentHistory(userID)
+	// Intentar obtener el historial desde los snapshots
+	history, err := cryptoRepo.GetInvestmentHistoryFromSnapshots(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener el historial de inversiones"})
 		return
+	}
+
+	// Si no hay historial, intentar crear un snapshot con el valor actual
+	if len(history.History) == 0 {
+		log.Printf("No hay snapshots para el usuario %s, intentando crear uno con el valor actual", userID)
+
+		// Crear un repositorio de tenencias
+		holdingsRepo := repository.NewHoldingsRepository(database.DB)
+
+		// Obtener las tenencias
+		holdings, err := holdingsRepo.GetHoldings(userID)
+		if err == nil && holdings.TotalCurrentValue > 0 {
+			// Guardar un snapshot del valor actual
+			err = cryptoRepo.SaveInvestmentSnapshot(
+				userID,
+				holdings.TotalCurrentValue,
+				holdings.TotalInvested,
+				holdings.TotalProfit,
+				holdings.ProfitPercentage,
+			)
+			if err != nil {
+				log.Printf("Error al crear snapshot automático: %v", err)
+			} else {
+				// Intentar obtener el historial nuevamente
+				history, err = cryptoRepo.GetInvestmentHistoryFromSnapshots(userID)
+				if err != nil {
+					log.Printf("Error al obtener el historial después de crear snapshot: %v", err)
+				}
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"investment_history": history})

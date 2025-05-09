@@ -27,3 +27,14 @@ type InvestmentHistory struct {
 	History         []DailyValue `json:"history"`
 	TrendPercentage float64      `json:"trend_percentage"`
 }
+
+// InvestmentSnapshot representa un registro del valor total de las inversiones en un momento específico
+type InvestmentSnapshot struct {
+	ID               string    `json:"id"`
+	UserID           string    `json:"user_id"`
+	Date             time.Time `json:"date"`
+	TotalValue       float64   `json:"total_value"`
+	TotalInvested    float64   `json:"total_invested"`
+	Profit           float64   `json:"profit"`
+	ProfitPercentage float64   `json:"profit_percentage"`
+}

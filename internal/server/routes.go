@@ -48,6 +48,8 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.GET("/holdings", middleware.GetHoldings)
 		protected.GET("/current-balance", middleware.GetCurrentBalance)
 		protected.GET("/investment-history", middleware.GetInvestmentHistory)
+		protected.POST("/force-snapshot", middleware.ForceCreateSnapshot)
+		protected.POST("/force-snapshot-with-date", middleware.ForceCreateSnapshotWithDate)
 
 		// Nuevas rutas para bolsas
 		protected.POST("/bolsas", middleware.CreateBolsa)
