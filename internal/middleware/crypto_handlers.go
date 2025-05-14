@@ -565,7 +565,7 @@ func GetLiveBalance(c *gin.Context) {
 	// Obtener el ID del usuario desde el token JWT
 	userID := c.GetString("userId")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado "})
 		return
 	}
 
