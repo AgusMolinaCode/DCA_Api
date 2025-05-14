@@ -94,12 +94,12 @@ func (r *BolsaRepository) GetBolsaByID(id string) (*models.Bolsa, error) {
 		}
 
 		// Obtener precio actual y calcular valores
-		cryptoData, err := services.GetCryptoPrice(asset.Ticker)
+		cryptoData, err := services.GetCryptoPriceFromCoinGecko(asset.Ticker)
 		if err != nil {
 			// Si no podemos obtener el precio actual, usamos el precio de compra
 			asset.CurrentPrice = asset.PurchasePrice
 		} else {
-			asset.CurrentPrice = cryptoData.Raw[asset.Ticker]["USD"].PRICE
+			asset.CurrentPrice = cryptoData.Price
 		}
 
 		asset.CurrentValue = asset.Amount * asset.CurrentPrice
@@ -196,12 +196,12 @@ func (r *BolsaRepository) GetBolsasByUserID(userID string) ([]models.Bolsa, erro
 			}
 
 			// Obtener precio actual y calcular valores
-			cryptoData, err := services.GetCryptoPrice(asset.Ticker)
+			cryptoData, err := services.GetCryptoPriceFromCoinGecko(asset.Ticker)
 			if err != nil {
 				// Si no podemos obtener el precio actual, usamos el precio de compra
 				asset.CurrentPrice = asset.PurchasePrice
 			} else {
-				asset.CurrentPrice = cryptoData.Raw[asset.Ticker]["USD"].PRICE
+				asset.CurrentPrice = cryptoData.Price
 			}
 
 			asset.CurrentValue = asset.Amount * asset.CurrentPrice
@@ -644,12 +644,12 @@ func (r *BolsaRepository) getAssetsForBolsa(bolsaID string) ([]models.AssetInBol
 		}
 
 		// Obtener precio actual y calcular valores
-		cryptoData, err := services.GetCryptoPrice(asset.Ticker)
+		cryptoData, err := services.GetCryptoPriceFromCoinGecko(asset.Ticker)
 		if err != nil {
 			// Si no podemos obtener el precio actual, usamos el precio de compra
 			asset.CurrentPrice = asset.PurchasePrice
 		} else {
-			asset.CurrentPrice = cryptoData.Raw[asset.Ticker]["USD"].PRICE
+			asset.CurrentPrice = cryptoData.Price
 		}
 
 		asset.CurrentValue = asset.Amount * asset.CurrentPrice

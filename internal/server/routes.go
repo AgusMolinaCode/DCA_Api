@@ -63,6 +63,8 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.POST("/bolsas/:id/tags", middleware.ManageBolsaTags)
 		protected.GET("/bolsas/tags/:tag", middleware.GetBolsasByTag)
 
+		// Agregar la ruta para balance en tiempo real
+		protected.GET("/live-balance", middleware.GetLiveBalance) 
 	}
 
 	// Configurar opciones para rutas de administración

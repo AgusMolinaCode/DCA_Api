@@ -559,3 +559,49 @@ func GetInvestmentHistory(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"investment_history": history})
 }
+
+// GetLiveBalance obtiene el balance actualizado en tiempo real
+func GetLiveBalance(c *gin.Context) {
+	// Obtener el ID del usuario desde el token JWT
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
+		return
+	}
+
+	// Obtener el actualizador de precios
+	priceUpdater := GetPriceUpdater()
+	if priceUpdater == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Servicio de actualización de precios no disponible"})
+		return
+	}
+
+	// Obtener el balance en caché
+	balance, exists := priceUpdater.GetCachedBalance(userID)
+	if !exists {
+		// Si no existe en caché, obtenerlo directamente
+		holdingsRepo := repository.NewHoldingsRepository(database.DB)
+		holdings, err := holdingsRepo.GetHoldings(userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al obtener tenencias: %v", err)})
+			return
+		}
+		balance = holdings
+	}
+
+	// Obtener la última actualización
+	lastUpdated := priceUpdater.GetLastUpdated()
+
+	// Calcular segundos hasta la próxima actualización
+	nextUpdateIn := 15.0 - time.Since(lastUpdated).Seconds()
+	if nextUpdateIn < 0 {
+		nextUpdateIn = 0
+	}
+
+	// Devolver los datos
+	c.JSON(http.StatusOK, gin.H{
+		"balance":        balance,
+		"last_updated":   lastUpdated.Format("2006-01-02 15:04:05"),
+		"next_update_in": nextUpdateIn,
+	})
+}

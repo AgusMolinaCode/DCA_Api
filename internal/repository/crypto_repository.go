@@ -411,7 +411,7 @@ func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]mode
 					// Si hay un error o el precio promedio es 0, usar el precio de compra de la transacción
 					avgPrice = tx.PurchasePrice
 				}
-				costBasis := avgPrice * tx.Amount
+				// costBasis := avgPrice * tx.Amount
 
 				// Asegurarse de que el total sea correcto (lo que se recibió por la venta)
 				if tx.USDTReceived > 0 {
@@ -423,12 +423,12 @@ func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]mode
 				// El valor actual es lo que valdría si aún tuviéramos la criptomoneda
 				detail.CurrentValue = tx.Amount * tx.PurchasePrice
 
-				// La ganancia/pérdida es lo que se recibió menos lo que costó
-				detail.GainLoss = tx.Total - costBasis
+				// La ganancia/pérdida es lo que se recibió menos lo que valdría ahora
+				detail.GainLoss = tx.Total - detail.CurrentValue
 
 				// Calcular el porcentaje de ganancia/pérdida
-				if costBasis > 0 {
-					detail.GainLossPercent = (detail.GainLoss / costBasis) * 100
+				if detail.CurrentValue > 0 {
+					detail.GainLossPercent = (detail.GainLoss / detail.CurrentValue) * 100
 				}
 			} else {
 				detail.CurrentValue = tx.Amount * tx.PurchasePrice
@@ -1043,17 +1043,24 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 
 	// Consultar si existe un snapshot para la fecha actual
 	query := `
-		SELECT id FROM investment_snapshots 
+		SELECT id, total_value FROM investment_snapshots 
 		WHERE user_id = ? AND date(date) = date(?)
-		ORDER BY date DESC LIMIT 1
+		ORDER BY total_value DESC LIMIT 1
 	`
 
 	var existingID string
-	err := r.db.QueryRow(query, userID, currentTime).Scan(&existingID)
+	var existingValue float64
+	err := r.db.QueryRow(query, userID, currentTime).Scan(&existingID, &existingValue)
 
-	// Si existe un snapshot para hoy, actualizarlo en lugar de crear uno nuevo
+	// Si existe un snapshot para hoy, verificar si el valor actual es mayor
 	if err == nil {
-		log.Printf("Ya existe un snapshot para hoy (%s) con ID %s, actualizándolo", currentDateStr, existingID)
+		// Si el valor existente es mayor o igual al nuevo valor, no actualizamos
+		if existingValue >= totalValue {
+			log.Printf("No se actualizó el snapshot porque el valor existente (%f) es mayor o igual al nuevo valor (%f)", existingValue, totalValue)
+			return nil
+		}
+
+		log.Printf("Actualizando snapshot para hoy (%s) con ID %s, nuevo valor máximo: %f (anterior: %f)", currentDateStr, existingID, totalValue, existingValue)
 
 		updateQuery := `
 			UPDATE investment_snapshots 
@@ -1076,7 +1083,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 			return err
 		}
 
-		log.Printf("Snapshot actualizado exitosamente para la fecha %s", currentDateStr)
+		log.Printf("Snapshot actualizado exitosamente para la fecha %s con nuevo valor máximo: %f", currentDateStr, totalValue)
 		return nil
 	}
 
@@ -1109,7 +1116,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 	if err != nil {
 		log.Printf("Error al guardar nuevo snapshot: %v", err)
 	} else {
-		log.Printf("Nuevo snapshot guardado exitosamente con ID: %s para la fecha %s", id, currentDateStr)
+		log.Printf("Nuevo snapshot guardado exitosamente con ID: %s para la fecha %s con valor inicial: %f", id, currentDateStr, totalValue)
 	}
 
 	return err
