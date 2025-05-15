@@ -48,12 +48,12 @@ func NewPriceUpdater(interval time.Duration) *PriceUpdater {
 // Funciones auxiliares para crear los repositorios
 func createCryptoRepository() CryptoRepositoryInterface {
 	// Implementación que crea el repositorio concreto
-	return &cryptoRepositoryAdapter{db: database.DB.(*sql.DB)}
+	return &cryptoRepositoryAdapter{db: database.DB}
 }
 
 func createHoldingsRepository() HoldingsRepositoryInterface {
 	// Implementación que crea el repositorio concreto
-	return &holdingsRepositoryAdapter{db: database.DB.(*sql.DB)}
+	return &holdingsRepositoryAdapter{db: database.DB}
 }
 
 // Adaptadores para los repositorios
@@ -191,7 +191,7 @@ func (a *holdingsRepositoryAdapter) GetHoldings(userID string) (*models.Holdings
 
 	// Procesar cada transacción
 	for rows.Next() {
-		var tx models.Transaction
+		var tx models.CryptoTransaction
 		err := rows.Scan(
 			&tx.ID, &tx.UserID, &tx.Ticker, &tx.Type, &tx.Amount,
 			&tx.PurchasePrice, &tx.Total, &tx.Date, &tx.USDTReceived,
@@ -288,13 +288,19 @@ func (a *holdingsRepositoryAdapter) GetHoldings(userID string) (*models.Holdings
 		chartColors = append(chartColors, holding.Color)
 	}
 
+	// Convertir slice de punteros a slice de valores
+	distribution := make([]models.CryptoWeight, len(holdings))
+	for i, h := range holdings {
+		distribution[i] = *h
+	}
+
 	// Crear el objeto de respuesta
 	result := &models.Holdings{
 		TotalCurrentValue: totalCurrentValue,
 		TotalInvested:     totalInvested,
 		TotalProfit:       totalProfit,
 		ProfitPercentage:  profitPercentage,
-		Distribution:      holdings,
+		Distribution:      distribution,
 		ChartData: models.PieChartData{
 			Labels:   labels,
 			Values:   values,
