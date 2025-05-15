@@ -516,20 +516,36 @@ func ForceCreateSnapshotWithDate(c *gin.Context) {
 	})
 }
 
-// GetInvestmentHistory obtiene el historial diario del valor total de las inversiones
+// GetInvestmentHistory obtiene el historial de valores de inversión en intervalos de 1 minuto
 func GetInvestmentHistory(c *gin.Context) {
 	userID := c.GetString("userId")
 
-	// Intentar obtener el historial desde los snapshots
-	history, err := cryptoRepo.GetInvestmentHistoryFromSnapshots(userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener el historial de inversiones"})
+	// Obtener el límite de registros a mostrar (por defecto 60 = 1 hora)
+	limit := 60
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	// Obtener el actualizador de precios
+	priceUpdater := GetPriceUpdater()
+	if priceUpdater == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Servicio de actualización de precios no disponible"})
 		return
 	}
 
-	// Si no hay historial, intentar crear un snapshot con el valor actual
-	if len(history.History) == 0 {
-		log.Printf("No hay snapshots para el usuario %s, intentando crear uno con el valor actual", userID)
+	// Obtener el historial formateado para gráficos
+	historyData, err := priceUpdater.GetFormattedInvestmentHistory(userID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al obtener el historial de inversiones: %v", err)})
+		return
+	}
+
+	// Si no hay snapshots, crear uno con el valor actual
+	snapshots := historyData["snapshots"].([]models.InvestmentSnapshot)
+	if len(snapshots) == 0 {
+		log.Printf("No hay snapshots para el usuario %s, creando uno con el valor actual", userID)
 
 		// Crear un repositorio de tenencias
 		holdingsRepo := repository.NewHoldingsRepository(database.DB)
@@ -549,15 +565,12 @@ func GetInvestmentHistory(c *gin.Context) {
 				log.Printf("Error al crear snapshot automático: %v", err)
 			} else {
 				// Intentar obtener el historial nuevamente
-				history, err = cryptoRepo.GetInvestmentHistoryFromSnapshots(userID)
-				if err != nil {
-					log.Printf("Error al obtener el historial después de crear snapshot: %v", err)
-				}
+				historyData, _ = priceUpdater.GetFormattedInvestmentHistory(userID, limit)
 			}
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"investment_history": history})
+	c.JSON(http.StatusOK, gin.H{"investment_history": historyData})
 }
 
 // GetLiveBalance obtiene el balance actualizado en tiempo real
