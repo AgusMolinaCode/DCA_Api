@@ -1230,6 +1230,25 @@ func (r *CryptoRepository) GetInvestmentSnapshots(userID string) ([]models.Inves
 	return snapshots, nil
 }
 
+// DeleteInvestmentSnapshot elimina un snapshot de inversión por su ID
+func (r *CryptoRepository) DeleteInvestmentSnapshot(userID, snapshotID string) error {
+	// Verificar que el snapshot pertenezca al usuario
+	var count int
+	err := r.db.QueryRow("SELECT COUNT(*) FROM investment_snapshots WHERE id = ? AND user_id = ?",
+		snapshotID, userID).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("snapshot no encontrado o no tienes permiso para eliminarlo")
+	}
+
+	// Eliminar el snapshot
+	_, err = r.db.Exec("DELETE FROM investment_snapshots WHERE id = ? AND user_id = ?",
+		snapshotID, userID)
+	return err
+}
+
 func (r *CryptoRepository) GetInvestmentHistoryFromSnapshots(userID string) (models.InvestmentHistory, error) {
 	// Obtener todos los snapshots del usuario
 	snapshots, err := r.GetInvestmentSnapshots(userID)

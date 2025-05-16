@@ -615,3 +615,36 @@ func GetLiveBalance(c *gin.Context) {
 		"next_update_in": nextUpdateIn,
 	})
 }
+
+// DeleteInvestmentSnapshot elimina un snapshot de inversión por su ID
+// @Summary Elimina un snapshot de inversión
+// @Description Elimina un snapshot específico de inversión por su ID
+// @Tags Investment
+// @Accept json
+// @Produce json
+// @Param id path string true "ID del snapshot a eliminar"
+// @Success 200 {object} map[string]string "Mensaje de éxito"
+// @Failure 400 {object} map[string]string "Error al procesar la solicitud"
+// @Failure 404 {object} map[string]string "Snapshot no encontrado"
+// @Failure 500 {object} map[string]string "Error al eliminar el snapshot"
+// @Router /api/investment/snapshots/{id} [delete]
+// @Security Bearer
+func DeleteInvestmentSnapshot(c *gin.Context) {
+	userID := c.GetString("userId")
+	snapshotID := c.Param("id")
+
+	// Verificar que el snapshot exista y pertenezca al usuario
+	err := cryptoRepo.DeleteInvestmentSnapshot(userID, snapshotID)
+	if err != nil {
+		if err.Error() == "snapshot no encontrado o no tienes permiso para eliminarlo" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Snapshot no encontrado o no tienes permiso para eliminarlo"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al eliminar el snapshot: %v", err)})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Snapshot eliminado exitosamente",
+	})
+}

@@ -45,10 +45,11 @@ type PriceUpdater struct {
 }
 
 // NewPriceUpdater crea un nuevo servicio de actualización de precios
+// El parámetro interval ya no se usa, se mantiene por compatibilidad
 func NewPriceUpdater(interval time.Duration) *PriceUpdater {
-	// Aquí usamos la implementación concreta, pero a través de la interfaz
+	// Ignoramos el intervalo que nos pasan y usamos 1 minuto fijo
 	return &PriceUpdater{
-		interval:      interval,
+		interval:      time.Minute, // Siempre 1 minuto
 		cryptoRepo:    createCryptoRepository(),
 		holdingsRepo:  createHoldingsRepository(),
 		isRunning:     false,
@@ -499,35 +500,38 @@ func (p *PriceUpdater) Start() {
 			snapshotsSaved := 0
 			snapshotsSkipped := 0
 
-			// Para cada usuario, guardar un snapshot con el valor máximo del minuto anterior
+			// Para cada usuario, guardar un snapshot con el valor actual
 			for _, userID := range userIDs {
-				// Si tenemos un valor máximo para este usuario, guardarlo
-				if maxValue, exists := currentMaxValues[userID]; exists && maxValue > 0 {
-					// Obtener los otros valores
-					totalInvested := currentInvested[userID]
-					profit := currentProfit[userID]
-					profitPercentage := currentProfitPct[userID]
-
-					// Usar SaveInvestmentSnapshot para aprovechar toda su lógica de validación
-					err = p.cryptoRepo.SaveInvestmentSnapshot(
-						userID,
-						maxValue,
-						totalInvested,
-						profit,
-						profitPercentage,
-					)
-
-					if err != nil {
-						log.Printf("Error al guardar snapshot para usuario %s: %v", userID, err)
-						snapshotsSkipped++
-					} else {
-						log.Printf("Snapshot guardado para usuario %s con valor máximo: %.2f", userID, maxValue)
-						snapshotsSaved++
-					}
-				} else {
-					log.Printf("No hay valor máximo para el usuario %s, omitiendo...", userID)
+				// Obtener el balance actual del usuario
+				totalValue, totalInvested, profit, profitPercentage, err := p.getUserBalance(userID)
+				if err != nil {
+					log.Printf("Error al obtener balance para usuario %s: %v", userID, err)
 					snapshotsSkipped++
+					continue
 				}
+
+				// Usar SaveInvestmentSnapshot para guardar el snapshot
+				err = p.cryptoRepo.SaveInvestmentSnapshot(
+					userID,
+					totalValue,
+					totalInvested,
+					profit,
+					profitPercentage,
+				)
+
+				if err != nil {
+					log.Printf("Error al guardar snapshot para usuario %s: %v", userID, err)
+					snapshotsSkipped++
+				} else {
+					log.Printf("Snapshot guardado para usuario %s con valor: %.2f", userID, totalValue)
+					snapshotsSaved++
+				}
+
+				// Actualizar los valores máximos para el próximo minuto
+				currentMaxValues[userID] = totalValue
+				currentInvested[userID] = totalInvested
+				currentProfit[userID] = profit
+				currentProfitPct[userID] = profitPercentage
 			}
 
 			// Registrar resumen de la operación

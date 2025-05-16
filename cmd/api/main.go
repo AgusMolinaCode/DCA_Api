@@ -44,10 +44,15 @@ func main() {
 	// Inicializar auth
 	middleware.InitAuth()
 
-	// Iniciar el servicio de actualización de precios (cada 15 segundos)
-	priceUpdater = services.NewPriceUpdater(15 * time.Second)
+	// Iniciar el servicio de actualización de precios (snapshots cada minuto)
+	log.Println("Iniciando servicio de actualización de precios...")
+	priceUpdater = services.NewPriceUpdater(time.Minute) // El intervalo se ignora internamente
 	priceUpdater.Start()
-	defer priceUpdater.Stop()
+	defer func() {
+		log.Println("Deteniendo servicio de actualización de precios...")
+		priceUpdater.Stop()
+	}()
+	log.Println("Servicio de actualización de precios iniciado correctamente")
 
 	// Hacer disponible el actualizador de precios para los handlers
 	middleware.SetPriceUpdater(priceUpdater)

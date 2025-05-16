@@ -64,7 +64,10 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.GET("/bolsas/tags/:tag", middleware.GetBolsasByTag)
 
 		// Agregar la ruta para balance en tiempo real
-		protected.GET("/live-balance", middleware.GetLiveBalance) 
+		protected.GET("/live-balance", middleware.GetLiveBalance)
+		
+		// Ruta para eliminar snapshots de inversión
+		protected.DELETE("/investment/snapshots/:id", middleware.DeleteInvestmentSnapshot) 
 	}
 
 	// Configurar opciones para rutas de administración
