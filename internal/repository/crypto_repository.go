@@ -1038,29 +1038,35 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 	// Obtener la fecha actual
 	currentTime := time.Now()
 
-	// Verificar si ya existe un snapshot para el día actual
-	currentDateStr := currentTime.Format("2006-01-02")
+	// Verificar si ya existe un snapshot para este minuto
+	// Redondear al minuto actual para agrupar por minuto
+	roundedTime := time.Date(
+		currentTime.Year(),
+		currentTime.Month(),
+		currentTime.Day(),
+		currentTime.Hour(),
+		currentTime.Minute(),
+		0,       // segundos
+		0,       // nanosegundos
+		time.UTC, // timezone
+	)
 
-	// Consultar si existe un snapshot para la fecha actual
+	// Consultar si ya existe un snapshot para este minuto
 	query := `
 		SELECT id, total_value FROM investment_snapshots 
-		WHERE user_id = ? AND date(date) = date(?)
-		ORDER BY total_value DESC LIMIT 1
+		WHERE user_id = ? AND strftime('%Y-%m-%d %H:%M', date) = ?
+		LIMIT 1
 	`
 
 	var existingID string
 	var existingValue float64
-	err := r.db.QueryRow(query, userID, currentTime).Scan(&existingID, &existingValue)
+	minuteStr := roundedTime.Format("2006-01-02 15:04")
+	err := r.db.QueryRow(query, userID, minuteStr).Scan(&existingID, &existingValue)
 
-	// Si existe un snapshot para hoy, verificar si el valor actual es mayor
+	// Si ya existe un snapshot para este minuto, actualizarlo
 	if err == nil {
-		// Si el valor existente es mayor o igual al nuevo valor, no actualizamos
-		if existingValue >= totalValue {
-			log.Printf("No se actualizó el snapshot porque el valor existente (%f) es mayor o igual al nuevo valor (%f)", existingValue, totalValue)
-			return nil
-		}
-
-		log.Printf("Actualizando snapshot para hoy (%s) con ID %s, nuevo valor máximo: %f (anterior: %f)", currentDateStr, existingID, totalValue, existingValue)
+		log.Printf("Actualizando snapshot para %s con ID %s, nuevo valor: %f (anterior: %f)", 
+			minuteStr, existingID, totalValue, existingValue)
 
 		updateQuery := `
 			UPDATE investment_snapshots 
@@ -1074,17 +1080,21 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 			totalInvested,
 			profit,
 			profitPercentage,
-			currentTime,
+			currentTime, // Usamos la hora exacta
 			existingID,
 		)
+
 
 		if err != nil {
 			log.Printf("Error al actualizar snapshot existente: %v", err)
 			return err
 		}
 
-		log.Printf("Snapshot actualizado exitosamente para la fecha %s con nuevo valor máximo: %f", currentDateStr, totalValue)
+		log.Printf("Snapshot actualizado exitosamente para %s con valor: %f", minuteStr, totalValue)
 		return nil
+	} else if err != sql.ErrNoRows {
+		// Si hay un error que no sea "no hay filas", lo registramos
+		log.Printf("Error al verificar snapshot existente: %v", err)
 	}
 
 	// Si no existe un snapshot para hoy o hubo un error, crear uno nuevo
@@ -1093,7 +1103,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 
 	// Registrar los valores que se van a guardar
 	log.Printf("Guardando nuevo snapshot para usuario %s en fecha %s: totalValue=%f, totalInvested=%f, profit=%f, profitPercentage=%f",
-		userID, currentDateStr, totalValue, totalInvested, profit, profitPercentage)
+		userID, minuteStr, totalValue, totalInvested, profit, profitPercentage)
 
 	// Insertar el snapshot en la base de datos
 	insertQuery := `
@@ -1116,12 +1126,72 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 	if err != nil {
 		log.Printf("Error al guardar nuevo snapshot: %v", err)
 	} else {
-		log.Printf("Nuevo snapshot guardado exitosamente con ID: %s para la fecha %s con valor inicial: %f", id, currentDateStr, totalValue)
+		log.Printf("Nuevo snapshot guardado exitosamente con ID: %s para la fecha %s con valor inicial: %f", id, minuteStr, totalValue)
 	}
 
 	return err
 }
 
+// GetInvestmentHistorySince obtiene el historial de inversiones desde una fecha específica
+func (r *CryptoRepository) GetInvestmentHistorySince(userID string, since time.Time) ([]models.InvestmentSnapshot, error) {
+	// Consultar los snapshots desde la fecha especificada, agrupados por minuto
+	query := `
+		SELECT 
+			id, 
+			user_id, 
+			strftime('%Y-%m-%d %H:%M:00', date) as minute, 
+			MAX(total_value) as total_value,
+			total_invested,
+			profit,
+			profit_percentage
+		FROM investment_snapshots
+		WHERE user_id = ? AND date >= ?
+		GROUP BY strftime('%Y-%m-%d %H:%M', date)
+		ORDER BY minute ASC
+	`
+
+	rows, err := r.db.Query(query, userID, since)
+	if err != nil {
+		return nil, fmt.Errorf("error al consultar historial de inversiones: %v", err)
+	}
+	defer rows.Close()
+
+	// Procesar los resultados
+	snapshots := []models.InvestmentSnapshot{}
+	for rows.Next() {
+		var snapshot models.InvestmentSnapshot
+		var minuteStr string
+		
+		err := rows.Scan(
+			&snapshot.ID,
+			&snapshot.UserID,
+			&minuteStr,
+			&snapshot.TotalValue,
+			&snapshot.TotalInvested,
+			&snapshot.Profit,
+			&snapshot.ProfitPercentage,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error al escanear snapshot: %v", err)
+		}
+
+		// Parsear la fecha del minuto
+		snapshot.Date, err = time.Parse("2006-01-02 15:04:05", minuteStr)
+		if err != nil {
+			return nil, fmt.Errorf("error al analizar fecha: %v", err)
+		}
+
+		snapshots = append(snapshots, snapshot)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error al iterar snapshots: %v", err)
+	}
+
+	return snapshots, nil
+}
+
+// GetInvestmentSnapshots obtiene todos los snapshots de inversión de un usuario
 func (r *CryptoRepository) GetInvestmentSnapshots(userID string) ([]models.InvestmentSnapshot, error) {
 	// Consultar los snapshots ordenados por fecha
 	query := `
