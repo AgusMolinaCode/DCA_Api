@@ -520,13 +520,15 @@ func ForceCreateSnapshotWithDate(c *gin.Context) {
 func GetInvestmentHistory(c *gin.Context) {
 	userID := c.GetString("userId")
 
-	// Obtener el límite de registros a mostrar (por defecto 60 = 1 hora)
-	limit := 60
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
-		}
+	// Obtener los minutos hacia atrás que queremos mostrar (por defecto 60 minutos)
+	minutesStr := c.DefaultQuery("minutes", "60")
+	minutes, err := strconv.Atoi(minutesStr)
+	if err != nil || minutes <= 0 {
+		minutes = 60 // Valor predeterminado: 60 minutos
 	}
+
+	// Calcular la fecha desde la que queremos los datos
+	since := time.Now().Add(-time.Duration(minutes) * time.Minute)
 
 	// Obtener el actualizador de precios
 	priceUpdater := GetPriceUpdater()
@@ -535,39 +537,34 @@ func GetInvestmentHistory(c *gin.Context) {
 		return
 	}
 
-	// Obtener el historial formateado para gráficos
-	historyData, err := priceUpdater.GetFormattedInvestmentHistory(userID, limit)
+	// Crear un repositorio de tenencias y guardar un snapshot actual
+	holdingsRepo := repository.NewHoldingsRepository(database.DB)
+	holdings, err := holdingsRepo.GetHoldings(userID)
+	if err == nil && holdings.TotalCurrentValue > 0 {
+		// Guardar un snapshot del valor actual cuando se hace la petición GET
+		err = cryptoRepo.SaveInvestmentSnapshot(
+			userID,
+			holdings.TotalCurrentValue,
+			holdings.TotalInvested,
+			holdings.TotalProfit,
+			holdings.ProfitPercentage,
+		)
+		if err != nil {
+			log.Printf("Error al crear snapshot manual: %v", err)
+		}
+	}
+
+	// Obtener el historial formateado para gráficos desde la fecha calculada
+	historyData, err := priceUpdater.GetFormattedInvestmentHistorySince(userID, since)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al obtener el historial de inversiones: %v", err)})
 		return
 	}
 
-	// Si no hay snapshots, crear uno con el valor actual
+	// Si no hay snapshots, devolver un objeto vacío
 	snapshots := historyData["snapshots"].([]models.InvestmentSnapshot)
 	if len(snapshots) == 0 {
-		log.Printf("No hay snapshots para el usuario %s, creando uno con el valor actual", userID)
-
-		// Crear un repositorio de tenencias
-		holdingsRepo := repository.NewHoldingsRepository(database.DB)
-
-		// Obtener las tenencias
-		holdings, err := holdingsRepo.GetHoldings(userID)
-		if err == nil && holdings.TotalCurrentValue > 0 {
-			// Guardar un snapshot del valor actual
-			err = cryptoRepo.SaveInvestmentSnapshot(
-				userID,
-				holdings.TotalCurrentValue,
-				holdings.TotalInvested,
-				holdings.TotalProfit,
-				holdings.ProfitPercentage,
-			)
-			if err != nil {
-				log.Printf("Error al crear snapshot automático: %v", err)
-			} else {
-				// Intentar obtener el historial nuevamente
-				historyData, _ = priceUpdater.GetFormattedInvestmentHistory(userID, limit)
-			}
-		}
+		log.Printf("No hay snapshots para el usuario %s", userID)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"investment_history": historyData})

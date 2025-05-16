@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -15,10 +16,19 @@ import (
 type CryptoRepositoryInterface interface {
 	SaveInvestmentSnapshot(userID string, totalValue, totalInvested, profit, profitPercentage float64) error
 	GetInvestmentHistory(userID string, limit int) ([]models.InvestmentSnapshot, error)
+	GetInvestmentHistorySince(userID string, since time.Time) ([]models.InvestmentSnapshot, error)
 }
 
 type HoldingsRepositoryInterface interface {
 	GetHoldings(userID string) (*models.Holdings, error)
+}
+
+// userBalance almacena el balance de un usuario
+type userBalance struct {
+	totalValue    float64
+	totalInvested float64
+	profit        float64
+	profitPct     float64
 }
 
 // PriceUpdater es un servicio que actualiza los precios de las criptomonedas periódicamente
@@ -31,6 +41,7 @@ type PriceUpdater struct {
 	mutex         sync.Mutex
 	lastUpdated   time.Time
 	cachedResults map[string]interface{}
+	userBalances  sync.Map // Almacena userBalance por userID
 }
 
 // NewPriceUpdater crea un nuevo servicio de actualización de precios
@@ -66,79 +77,99 @@ func (a *cryptoRepositoryAdapter) SaveInvestmentSnapshot(userID string, totalVal
 	// Verificar que los valores sean válidos
 	if totalValue <= 0 || totalInvested <= 0 {
 		log.Printf("No se guardó el snapshot porque los valores no son válidos: totalValue=%f, totalInvested=%f", totalValue, totalInvested)
-		return nil // No guardamos snapshots con valores inválidos
+		return nil
 	}
 
-	// Obtener la fecha actual
+	// Generar un ID único para el snapshot
+	snapshotID := fmt.Sprintf("snapshot_%d", time.Now().UnixNano())
+
+	// Obtener la fecha actual y formatearla para el minuto actual
 	currentTime := time.Now()
-	
-	// Truncar la fecha al minuto actual para agrupar por minuto
-	minuteTime := currentTime.Truncate(time.Minute)
-	
-	// Verificar si ya existe un snapshot para este minuto
-	checkQuery := `
-		SELECT id, total_value FROM investment_snapshots
-		WHERE user_id = ? AND strftime('%Y-%m-%d %H:%M', date) = strftime('%Y-%m-%d %H:%M', ?)
+	currentMinute := currentTime.Truncate(time.Minute)
+	minuteStr := currentMinute.Format("2006-01-02 15:04")
+
+	// Registrar la operación para depuración
+	log.Printf("=== INICIO SaveInvestmentSnapshot para usuario %s a las %s ===", userID, currentTime.Format("2006-01-02 15:04:05"))
+	log.Printf("Intentando guardar snapshot para minuto %s con valor: %.2f", minuteStr, totalValue)
+
+	// Verificar si ya existe un snapshot para este minuto usando una consulta más compatible
+	existingQuery := `
+		SELECT id, total_value, date FROM investment_snapshots
+		WHERE user_id = ? AND 
+		      date >= ? AND 
+		      date < datetime(?, '+1 minute')
+		ORDER BY total_value DESC
 		LIMIT 1
 	`
-	
+
 	var existingID string
 	var existingValue float64
-	err := a.db.QueryRow(checkQuery, userID, minuteTime).Scan(&existingID, &existingValue)
-	
-	// Si ya existe un snapshot para este minuto, actualizarlo
+	var existingTime time.Time
+
+	err := a.db.QueryRow(existingQuery, userID, currentMinute, currentMinute).Scan(
+		&existingID, &existingValue, &existingTime,
+	)
+
 	if err == nil {
-		// Si el valor existente es mayor que el nuevo, mantener el valor mayor
-		if existingValue >= totalValue {
-			log.Printf("Ya existe un snapshot para este minuto con un valor mayor (%f vs %f). No se actualiza.", existingValue, totalValue)
+		// Ya existe un snapshot para este minuto
+		existingTimeStr := existingTime.Format("2006-01-02 15:04:05")
+		log.Printf("Ya existe un snapshot para este minuto (ID: %s, Hora: %s) con valor: %.2f", 
+			existingID, existingTimeStr, existingValue)
+		
+		if totalValue <= existingValue {
+			// El valor actual no es mayor, no hacemos nada
+			log.Printf("No se actualiza porque el valor actual (%.2f) no es mayor que el existente (%.2f)", 
+				totalValue, existingValue)
 			return nil
 		}
+
+		// El valor actual es mayor, actualizamos el snapshot existente
+		log.Printf("Actualizando snapshot existente (ID: %s) porque el valor actual (%.2f) es mayor que el existente (%.2f)", 
+			existingID, totalValue, existingValue)
 		
-		// Actualizar el snapshot existente con el nuevo valor (que es mayor)
 		updateQuery := `
 			UPDATE investment_snapshots
 			SET total_value = ?, total_invested = ?, profit = ?, profit_percentage = ?, date = ?
 			WHERE id = ?
 		`
-		
-		_, err := a.db.Exec(
+
+		_, err = a.db.Exec(
 			updateQuery,
 			totalValue,
 			totalInvested,
 			profit,
 			profitPercentage,
-			minuteTime,
+			currentTime, // Mantenemos la hora exacta de la actualización
 			existingID,
 		)
-		
+
 		if err != nil {
 			log.Printf("Error al actualizar snapshot existente: %v", err)
-			return err
+		} else {
+			log.Printf("Snapshot actualizado exitosamente para el minuto %s con nuevo valor %.2f", 
+				minuteStr, totalValue)
 		}
-		
-		log.Printf("Snapshot actualizado para el minuto actual con ID %s: %f (anterior: %f)", existingID, totalValue, existingValue)
-		return nil
+
+		return err
+	} else if err != sql.ErrNoRows {
+		// Error al consultar
+		log.Printf("Error al verificar snapshot existente: %v", err)
+		return err
 	}
 
-	// Si no existe un snapshot para este minuto, crear uno nuevo
-	id := fmt.Sprintf("snapshot_%d", time.Now().UnixNano())
-
-	// Registrar los valores que se van a guardar
-	log.Printf("Guardando nuevo snapshot para usuario %s en el minuto %s: totalValue=%f",
-		userID, minuteTime.Format("15:04"), totalValue)
-
-	// Insertar el snapshot en la base de datos
+	// No existe un snapshot para este minuto, insertamos uno nuevo
+	log.Printf("Creando nuevo snapshot para el minuto %s con valor %.2f", currentMinute, totalValue)
+	
 	insertQuery := `
-		INSERT INTO investment_snapshots (
-			id, user_id, date, total_value, total_invested, profit, profit_percentage
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO investment_snapshots (id, user_id, date, total_value, total_invested, profit, profit_percentage)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err = a.db.Exec(
 		insertQuery,
-		id,
+		snapshotID,
 		userID,
-		minuteTime, // Guardar con la fecha truncada al minuto
+		currentTime,
 		totalValue,
 		totalInvested,
 		profit,
@@ -148,34 +179,25 @@ func (a *cryptoRepositoryAdapter) SaveInvestmentSnapshot(userID string, totalVal
 	if err != nil {
 		log.Printf("Error al guardar nuevo snapshot: %v", err)
 	} else {
-		log.Printf("Nuevo snapshot guardado exitosamente para el minuto %s con ID: %s con valor: %f", minuteTime.Format("15:04"), id, totalValue)
+		log.Printf("Nuevo snapshot creado exitosamente para el minuto %s con valor %.2f", currentMinute, totalValue)
 	}
 
 	return err
 }
 
-// GetInvestmentHistory obtiene el historial de inversiones de un usuario, un valor por minuto
+// GetInvestmentHistory obtiene el historial de inversiones de un usuario
 func (a *cryptoRepositoryAdapter) GetInvestmentHistory(userID string, limit int) ([]models.InvestmentSnapshot, error) {
 	// Si el límite es 0 o negativo, usamos un valor predeterminado
 	if limit <= 0 {
 		limit = 100 // Valor predeterminado
 	}
 
-	// Consulta para obtener los snapshots agrupados por minuto
-	// Usamos strftime para agrupar por minuto y MAX para obtener el valor máximo de cada minuto
+	// Consulta para obtener todos los snapshots ordenados por fecha
 	query := `
-		SELECT 
-			MAX(id) as id, 
-			user_id, 
-			date, 
-			MAX(total_value) as total_value, 
-			total_invested, 
-			profit, 
-			profit_percentage
+		SELECT id, user_id, date, total_value, total_invested, profit, profit_percentage
 		FROM investment_snapshots
 		WHERE user_id = ?
-		GROUP BY user_id, strftime('%Y-%m-%d %H:%M', date)
-		ORDER BY date DESC
+		ORDER BY date ASC
 		LIMIT ?
 	`
 
@@ -206,9 +228,42 @@ func (a *cryptoRepositoryAdapter) GetInvestmentHistory(userID string, limit int)
 		snapshots = append(snapshots, snapshot)
 	}
 
-	// Invertir el orden para que esté cronológico (de más antiguo a más reciente)
-	for i, j := 0, len(snapshots)-1; i < j; i, j = i+1, j-1 {
-		snapshots[i], snapshots[j] = snapshots[j], snapshots[i]
+	return snapshots, nil
+}
+
+// GetInvestmentHistorySince obtiene los snapshots desde una fecha específica
+func (a *cryptoRepositoryAdapter) GetInvestmentHistorySince(userID string, since time.Time) ([]models.InvestmentSnapshot, error) {
+	query := `
+		SELECT id, user_id, date, total_value, total_invested, profit, profit_percentage
+		FROM investment_snapshots
+		WHERE user_id = ? AND date >= ?
+		ORDER BY date ASC
+	`
+
+	rows, err := a.db.Query(query, userID, since)
+	if err != nil {
+		log.Printf("Error al obtener historial de inversiones: %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var snapshots []models.InvestmentSnapshot
+	for rows.Next() {
+		var snapshot models.InvestmentSnapshot
+		err := rows.Scan(
+			&snapshot.ID,
+			&snapshot.UserID,
+			&snapshot.Date,
+			&snapshot.TotalValue,
+			&snapshot.TotalInvested,
+			&snapshot.Profit,
+			&snapshot.ProfitPercentage,
+		)
+		if err != nil {
+			log.Printf("Error al escanear snapshot: %v", err)
+			continue
+		}
+		snapshots = append(snapshots, snapshot)
 	}
 
 	return snapshots, nil
@@ -372,11 +427,13 @@ func (a *holdingsRepositoryAdapter) GetHoldings(userID string) (*models.Holdings
 }
 
 // Start inicia el servicio de actualización de precios
+// Guarda un snapshot exactamente al inicio de cada minuto
 func (p *PriceUpdater) Start() {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
 	if p.isRunning {
+		log.Println("El servicio de actualización de precios ya está en ejecución")
 		return
 	}
 
@@ -384,24 +441,193 @@ func (p *PriceUpdater) Start() {
 	p.stopChan = make(chan struct{})
 
 	go func() {
-		// Para pruebas, usamos un intervalo de 1 minuto independientemente del intervalo configurado
-		ticker := time.NewTicker(1 * time.Minute)
+		// Configurar el logger para incluir la hora exacta
+		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+		log.Println("=== INICIANDO SERVICIO DE ACTUALIZACIÓN DE PRECIOS ===")
+
+		// Calcular cuánto tiempo falta para el próximo minuto exacto
+		now := time.Now()
+		nextMinute := now.Truncate(time.Minute).Add(time.Minute)
+		initialDelay := nextMinute.Sub(now)
+
+		log.Printf("Próximo snapshot programado en %v segundos (a las %s)", 
+			initialDelay.Seconds(), nextMinute.Format("15:04:05"))
+
+		// Esperar hasta el próximo minuto exacto para comenzar
+		select {
+		case <-time.After(initialDelay):
+			log.Printf("Iniciando ciclo de actualizaciones a las %s", 
+				time.Now().Format("15:04:05.000"))
+		case <-p.stopChan:
+			log.Println("Servicio detenido antes de iniciar")
+			p.isRunning = false
+			return
+		}
+
+		// Crear un ticker que se dispare exactamente cada minuto
+		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 
-		// Actualizar inmediatamente al iniciar
-		p.updateAllUserBalances()
+		// Ticker más frecuente para actualizar los valores máximos (cada 10 segundos)
+		updateTicker := time.NewTicker(10 * time.Second)
+		defer updateTicker.Stop()
+
+		// Mapa para almacenar los valores máximos del minuto actual por usuario
+		currentMaxValues := make(map[string]float64) // [userID] = maxValue
+		currentInvested := make(map[string]float64)  // [userID] = totalInvested
+		currentProfit := make(map[string]float64)    // [userID] = profit
+		currentProfitPct := make(map[string]float64) // [userID] = profitPercentage
+
+		// Función para guardar los snapshots de todos los usuarios
+		saveSnapshots := func() {
+			startTime := time.Now()
+			snapshotTime := startTime.Truncate(time.Minute)
+			minuteStr := snapshotTime.Format("2006-01-02 15:04")
+
+			log.Printf("\n=== INICIANDO GUARDADO DE SNAPSHOTS PARA MINUTO %s ===", minuteStr)
+
+			// Obtener todos los usuarios
+			userIDs, err := p.getAllUsers()
+			if err != nil {
+				log.Printf("Error al obtener usuarios: %v", err)
+				return
+			}
+
+			log.Printf("Procesando %d usuarios para el minuto %s", len(userIDs), minuteStr)
+
+			// Contador para estadísticas
+			snapshotsSaved := 0
+			snapshotsSkipped := 0
+
+			// Para cada usuario, guardar un snapshot con el valor máximo del minuto anterior
+			for _, userID := range userIDs {
+				// Si tenemos un valor máximo para este usuario, guardarlo
+				if maxValue, exists := currentMaxValues[userID]; exists && maxValue > 0 {
+					// Obtener los otros valores
+					totalInvested := currentInvested[userID]
+					profit := currentProfit[userID]
+					profitPercentage := currentProfitPct[userID]
+
+					// Usar SaveInvestmentSnapshot para aprovechar toda su lógica de validación
+					err = p.cryptoRepo.SaveInvestmentSnapshot(
+						userID,
+						maxValue,
+						totalInvested,
+						profit,
+						profitPercentage,
+					)
+
+					if err != nil {
+						log.Printf("Error al guardar snapshot para usuario %s: %v", userID, err)
+						snapshotsSkipped++
+					} else {
+						log.Printf("Snapshot guardado para usuario %s con valor máximo: %.2f", userID, maxValue)
+						snapshotsSaved++
+					}
+				} else {
+					log.Printf("No hay valor máximo para el usuario %s, omitiendo...", userID)
+					snapshotsSkipped++
+				}
+			}
+
+			// Registrar resumen de la operación
+			duration := time.Since(startTime)
+			log.Printf("=== RESUMEN SNAPSHOTS MINUTO %s ===", minuteStr)
+			log.Printf("Usuarios procesados: %d", len(userIDs))
+			log.Printf("Snapshots guardados: %d", snapshotsSaved)
+			log.Printf("Snapshots omitidos: %d", snapshotsSkipped)
+			log.Printf("Tiempo total de procesamiento: %v\n", duration.Round(time.Millisecond))
+
+			// Reiniciar los valores máximos para el nuevo minuto
+			for userID := range currentMaxValues {
+				currentMaxValues[userID] = 0
+			}
+			for userID := range currentInvested {
+				currentInvested[userID] = 0
+			}
+			for userID := range currentProfit {
+				currentProfit[userID] = 0
+			}
+			for userID := range currentProfitPct {
+				currentProfitPct[userID] = 0
+			}
+		}
+
+		// Función para actualizar los valores máximos
+		updateMaxValues := func() {
+			startTime := time.Now()
+			log.Printf("\n=== INICIANDO ACTUALIZACIÓN DE VALORES MÁXIMOS A LAS %s ===", 
+				startTime.Format("15:04:05.000"))
+
+			// Obtener todos los usuarios
+			userIDs, err := p.getAllUsers()
+			if err != nil {
+				log.Printf("Error al obtener usuarios: %v", err)
+				return
+			}
+
+			log.Printf("Actualizando valores para %d usuarios", len(userIDs))
+
+			// Contadores para estadísticas
+			valuesUpdated := 0
+			valuesSkipped := 0
+
+			// Para cada usuario, obtener el balance actual y actualizar los máximos
+			for _, userID := range userIDs {
+				// Obtener el balance actual del usuario
+				totalValue, totalInvested, profit, profitPercentage, err := p.getUserBalance(userID)
+				if err != nil {
+					log.Printf("Error al obtener balance para usuario %s: %v", userID, err)
+					valuesSkipped++
+					continue
+				}
+
+				// Actualizar los valores máximos si es necesario
+				currentValue, exists := currentMaxValues[userID]
+				if !exists || totalValue > currentValue {
+					currentMaxValues[userID] = totalValue
+					currentInvested[userID] = totalInvested
+					currentProfit[userID] = profit
+					currentProfitPct[userID] = profitPercentage
+					
+					log.Printf("Actualizado máximo para usuario %s: %.2f (anterior: %.2f)", 
+						userID, totalValue, currentValue)
+					valuesUpdated++
+				} else {
+					valuesSkipped++
+				}
+			}
+
+			// Registrar resumen de la operación
+			duration := time.Since(startTime)
+			log.Printf("=== RESUMEN ACTUALIZACIÓN DE VALORES ===")
+			log.Printf("Usuarios procesados: %d", len(userIDs))
+			log.Printf("Valores actualizados: %d", valuesUpdated)
+			log.Printf("Valores sin cambios: %d", valuesSkipped)
+			log.Printf("Tiempo total de procesamiento: %v\n", duration.Round(time.Millisecond))
+		}
+
+		// Guardar snapshots inmediatamente al inicio
+		updateMaxValues()
+		saveSnapshots()
 
 		for {
 			select {
 			case <-ticker.C:
-				p.updateAllUserBalances()
+				// Cada minuto exacto, guardar los snapshots con los valores máximos
+				saveSnapshots()
+			
+			case <-updateTicker.C:
+				// Cada 5 segundos, actualizar los valores máximos
+				updateMaxValues()
+			
 			case <-p.stopChan:
 				return
 			}
 		}
 	}()
 
-	log.Printf("Servicio de actualización de precios iniciado con intervalo de 1 minuto (para pruebas)")
+	log.Printf("Servicio de actualización de precios iniciado (guardando un snapshot por minuto)")
 }
 
 // Stop detiene el servicio de actualización de precios
@@ -436,48 +662,57 @@ func (p *PriceUpdater) updateAllUserBalances() {
 	log.Printf("Actualización de precios completada para %d usuarios", len(users))
 }
 
+// getUserBalance obtiene el balance actual de un usuario
+func (p *PriceUpdater) getUserBalance(userID string) (totalValue, totalInvested, profit, profitPercentage float64, err error) {
+	// Obtener las tenencias del usuario
+	holdings, err := p.holdingsRepo.GetHoldings(userID)
+	if err != nil {
+		log.Printf("Error al obtener tenencias para usuario %s: %v", userID, err)
+		return 0, 0, 0, 0, err
+	}
+
+	// Actualizar el balance en el mapa
+	balance := userBalance{
+		totalValue:    holdings.TotalCurrentValue,
+		totalInvested: holdings.TotalInvested,
+		profit:        holdings.TotalProfit,
+		profitPct:     holdings.ProfitPercentage,
+	}
+	p.userBalances.Store(userID, balance)
+
+	return balance.totalValue, balance.totalInvested, balance.profit, balance.profitPct, nil
+}
+
 // updateUserBalance actualiza el balance de un usuario específico
 func (p *PriceUpdater) updateUserBalance(userID string) {
-	// Obtener las tenencias actualizadas del usuario
+	// Obtener las tenencias del usuario
 	holdings, err := p.holdingsRepo.GetHoldings(userID)
 	if err != nil {
 		log.Printf("Error al obtener tenencias para usuario %s: %v", userID, err)
 		return
 	}
 
-	// Guardar los resultados en caché
-	p.mutex.Lock()
-	p.cachedResults[userID] = holdings
-	p.mutex.Unlock()
-
-	// Guardar un snapshot si el valor es mayor que el máximo del día
-	err = p.cryptoRepo.SaveInvestmentSnapshot(
-		userID,
-		holdings.TotalCurrentValue,
-		holdings.TotalInvested,
-		holdings.TotalProfit,
-		holdings.ProfitPercentage,
-	)
-
-	if err != nil {
-		log.Printf("Error al guardar snapshot para usuario %s: %v", userID, err)
-	}
+	// Actualizar el balance en el mapa
+	p.userBalances.Store(userID, userBalance{
+		totalValue:    holdings.TotalCurrentValue,
+		totalInvested: holdings.TotalInvested,
+		profit:        holdings.TotalProfit,
+		profitPct:     holdings.ProfitPercentage,
+	})
 }
 
 // GetCachedBalance obtiene el balance en caché para un usuario
 func (p *PriceUpdater) GetCachedBalance(userID string) (interface{}, bool) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	result, exists := p.cachedResults[userID]
-	return result, exists
+	if balance, ok := p.userBalances.Load(userID); ok {
+		return balance, true
+	}
+	return nil, false
 }
 
-// GetLastUpdated obtiene la última vez que se actualizaron los precios
+// GetLastUpdated devuelve la última vez que se actualizaron los precios
 func (p *PriceUpdater) GetLastUpdated() time.Time {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-
 	return p.lastUpdated
 }
 
@@ -486,21 +721,16 @@ func (p *PriceUpdater) GetInvestmentHistory(userID string, limit int) ([]models.
 	return p.cryptoRepo.GetInvestmentHistory(userID, limit)
 }
 
+// GetInvestmentHistorySince obtiene el historial de inversiones de un usuario desde una fecha específica
+func (p *PriceUpdater) GetInvestmentHistorySince(userID string, since time.Time) ([]models.InvestmentSnapshot, error) {
+	return p.cryptoRepo.GetInvestmentHistorySince(userID, since)
+}
+
 // GetFormattedInvestmentHistory obtiene el historial de inversiones formateado para gráficos
 func (p *PriceUpdater) GetFormattedInvestmentHistory(userID string, limit int) (map[string]interface{}, error) {
-	// Obtener los snapshots
-	snapshots, err := p.GetInvestmentHistory(userID, limit)
+	snapshots, err := p.cryptoRepo.GetInvestmentHistory(userID, limit)
 	if err != nil {
 		return nil, err
-	}
-
-	// Si no hay snapshots, devolver un objeto vacío
-	if len(snapshots) == 0 {
-		return map[string]interface{}{
-			"snapshots": []models.InvestmentSnapshot{},
-			"labels":    []string{},
-			"values":    []float64{},
-		}, nil
 	}
 
 	// Preparar datos para el gráfico
@@ -516,6 +746,103 @@ func (p *PriceUpdater) GetFormattedInvestmentHistory(userID string, limit int) (
 	// Crear el objeto de respuesta
 	result := map[string]interface{}{
 		"snapshots": snapshots,
+		"labels":    labels,
+		"values":    values,
+	}
+
+	return result, nil
+}
+
+// GetFormattedInvestmentHistorySince obtiene el historial de inversiones desde una fecha específica, agrupado por minuto
+func (p *PriceUpdater) GetFormattedInvestmentHistorySince(userID string, since time.Time) (map[string]interface{}, error) {
+	// Actualizar manualmente el balance del usuario antes de obtener el historial
+	p.updateUserBalance(userID)
+
+	// Obtener los snapshots desde la fecha especificada
+	snapshots, err := p.GetInvestmentHistorySince(userID, since)
+	if err != nil {
+		return nil, err
+	}
+
+	// Si no hay snapshots, devolver un objeto vacío
+	if len(snapshots) == 0 {
+		return map[string]interface{}{
+			"snapshots": []models.InvestmentSnapshot{},
+			"labels":    []string{},
+			"values":    []float64{},
+		}, nil
+	}
+
+	// Ordenar los snapshots por fecha
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].Date.Before(snapshots[j].Date)
+	})
+
+	// Crear un mapa para agrupar por minuto (YYYY-MM-DD HH:MM)
+	minuteMap := make(map[string]models.InvestmentSnapshot)
+
+	// Procesar cada snapshot
+	for _, snapshot := range snapshots {
+		// Formatear la fecha a "2006-01-02 15:04" (año-mes-día hora:minuto)
+		// para agrupar por minuto exacto
+		minuteKey := snapshot.Date.Format("2006-01-02 15:04")
+		
+		// Si ya existe un snapshot para este minuto, solo actualizamos si es más reciente
+		if existing, exists := minuteMap[minuteKey]; exists {
+			if snapshot.Date.After(existing.Date) {
+				snapshot.Date = time.Date(
+					snapshot.Date.Year(), snapshot.Date.Month(), snapshot.Date.Day(),
+					snapshot.Date.Hour(), snapshot.Date.Minute(), 0, 0,
+					time.UTC,
+				)
+				minuteMap[minuteKey] = snapshot
+			}
+		} else {
+			// Asegurarse de que la fecha tenga segundos y milisegundos en 0 para agrupar por minuto
+			snapshot.Date = time.Date(
+				snapshot.Date.Year(), snapshot.Date.Month(), snapshot.Date.Day(),
+				snapshot.Date.Hour(), snapshot.Date.Minute(), 0, 0,
+				time.UTC,
+			)
+			minuteMap[minuteKey] = snapshot
+		}
+	}
+
+	// Convertir el mapa a slice y ordenar por fecha
+	type snapshotWithKey struct {
+		key      string
+		snapshot models.InvestmentSnapshot
+	}
+
+	var snapshotsList []snapshotWithKey
+	for key, snapshot := range minuteMap {
+		snapshotsList = append(snapshotsList, snapshotWithKey{
+			key:      key,
+			snapshot: snapshot,
+		})
+	}
+
+	// Ordenar por fecha
+	sort.Slice(snapshotsList, func(i, j int) bool {
+		return snapshotsList[i].snapshot.Date.Before(snapshotsList[j].snapshot.Date)
+	})
+
+	// Crear las listas ordenadas
+	var orderedSnapshots []models.InvestmentSnapshot
+	var labels []string
+	var values []float64
+
+	for _, item := range snapshotsList {
+		snapshot := item.snapshot
+		orderedSnapshots = append(orderedSnapshots, snapshot)
+		// Mostrar solo hora:minuto en las etiquetas
+		labels = append(labels, snapshot.Date.Format("15:04"))
+		values = append(values, snapshot.TotalValue)
+	}
+
+	// Crear el objeto de respuesta
+	result := map[string]interface{}{
+		"snapshots": orderedSnapshots,
 		"labels":    labels,
 		"values":    values,
 	}
