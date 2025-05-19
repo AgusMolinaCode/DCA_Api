@@ -105,7 +105,7 @@ func UpdateTransaction(c *gin.Context) {
 	// Validar que el usuario esté autenticado
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado."})
 		return
 	}
 
