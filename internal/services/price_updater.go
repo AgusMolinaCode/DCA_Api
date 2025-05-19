@@ -84,86 +84,114 @@ func (a *cryptoRepositoryAdapter) SaveInvestmentSnapshot(userID string, totalVal
 	// Generar un ID único para el snapshot
 	snapshotID := fmt.Sprintf("snapshot_%d", time.Now().UnixNano())
 
-	// Obtener la fecha actual y formatearla para el día actual
+	// Obtener la fecha actual y truncarla al intervalo de 5 minutos
 	currentTime := time.Now()
-	currentDay := currentTime.Truncate(24 * time.Hour) // Truncar a día completo
-	dayStr := currentDay.Format("2006-01-02")
-
+	// Truncar a intervalos de 5 minutos (300 segundos)
+	intervalSeconds := 5 * 60
+	currentInterval := currentTime.Truncate(time.Duration(intervalSeconds) * time.Second)
+	// Calcular el siguiente intervalo
+	nextInterval := currentInterval.Add(time.Duration(intervalSeconds) * time.Second)
+	
+	// Formatear para mostrar en logs
+	intervalStr := currentInterval.Format("2006-01-02 15:04")
+	
 	// Registrar la operación para depuración
 	log.Printf("=== INICIO SaveInvestmentSnapshot para usuario %s a las %s ===", userID, currentTime.Format("2006-01-02 15:04:05"))
-	log.Printf("Intentando guardar snapshot para el día %s con valor: %.2f", dayStr, totalValue)
+	log.Printf("Guardando nuevo snapshot para el intervalo %s con valor: %.2f", intervalStr, totalValue)
 
-	// Verificar si ya existe un snapshot para este día
+	// Verificar si ya existe un snapshot para este intervalo de 5 minutos
 	existingQuery := `
-		SELECT id, total_value, date FROM investment_snapshots
+		SELECT id, max_value, min_value FROM investment_snapshots
 		WHERE user_id = ? AND 
 		      date >= ? AND 
-		      date < datetime(?, '+1 day')
-		ORDER BY total_value DESC
+		      date < ?
+		ORDER BY date DESC
 		LIMIT 1
 	`
 
 	var existingID string
-	var existingValue float64
-	var existingTime time.Time
+	var maxValue sql.NullFloat64
+	var minValue sql.NullFloat64
 
-	err := a.db.QueryRow(existingQuery, userID, currentDay, currentDay).Scan(
-		&existingID, &existingValue, &existingTime,
+	err := a.db.QueryRow(existingQuery, userID, currentInterval, nextInterval).Scan(
+		&existingID, &maxValue, &minValue,
 	)
 
-	if err == nil {
-		// Ya existe un snapshot para este día
-		existingTimeStr := existingTime.Format("2006-01-02 15:04:05")
-		log.Printf("Ya existe un snapshot para este día (ID: %s, Hora: %s) con valor: %.2f", 
-			existingID, existingTimeStr, existingValue)
-		
-		if totalValue <= existingValue {
-			// El valor actual no es mayor, no hacemos nada
-			log.Printf("No se actualiza porque el valor actual (%.2f) no es mayor que el existente (%.2f)", 
-				totalValue, existingValue)
-			return nil
+	// Inicializar valores máximo y mínimo
+	newMaxValue := totalValue
+	newMinValue := totalValue
+
+	// Si ya existe un snapshot para este intervalo
+	if err == nil && existingID != "" {
+		log.Printf("Ya existe un snapshot para este intervalo (ID: %s)", existingID)
+
+		// Actualizar el valor máximo si el valor actual es mayor que el máximo existente
+		if maxValue.Valid && maxValue.Float64 > 0 {
+			if totalValue > maxValue.Float64 {
+				newMaxValue = totalValue
+				log.Printf("Nuevo valor máximo: %.2f (anterior: %.2f)", totalValue, maxValue.Float64)
+			} else {
+				newMaxValue = maxValue.Float64
+				log.Printf("Manteniendo valor máximo existente: %.2f", newMaxValue)
+			}
+		} else {
+			log.Printf("Inicializando valor máximo: %.2f", newMaxValue)
 		}
 
-		// El valor actual es mayor, actualizamos el snapshot existente
-		log.Printf("Actualizando snapshot existente (ID: %s) porque el valor actual (%.2f) es mayor que el existente (%.2f)", 
-			existingID, totalValue, existingValue)
+		// Actualizar el valor mínimo si el valor actual es menor que el mínimo existente
+		if minValue.Valid && minValue.Float64 > 0 {
+			if totalValue < minValue.Float64 {
+				newMinValue = totalValue
+				log.Printf("Nuevo valor mínimo: %.2f (anterior: %.2f)", totalValue, minValue.Float64)
+			} else {
+				newMinValue = minValue.Float64
+				log.Printf("Manteniendo valor mínimo existente: %.2f", newMinValue)
+			}
+		} else {
+			log.Printf("Inicializando valor mínimo: %.2f", newMinValue)
+		}
+
+		// Actualizar el snapshot existente con el nuevo valor actual pero manteniendo max/min históricos
+		log.Printf("Actualizando snapshot existente (ID: %s) con valor actual: %.2f, max: %.2f, min: %.2f", 
+			existingID, totalValue, newMaxValue, newMinValue)
 		
 		updateQuery := `
 			UPDATE investment_snapshots
-			SET total_value = ?, total_invested = ?, profit = ?, profit_percentage = ?, date = ?
+			SET total_value = ?, total_invested = ?, profit = ?, profit_percentage = ?, date = ?, max_value = ?, min_value = ?
 			WHERE id = ?
 		`
 
 		_, err = a.db.Exec(
 			updateQuery,
-			totalValue,
+			totalValue, // Actualizamos al valor actual
 			totalInvested,
 			profit,
 			profitPercentage,
-			currentTime, // Mantenemos la hora exacta de la actualización
+			currentTime, // Actualizamos la hora
+			newMaxValue, // Valor máximo histórico
+			newMinValue, // Valor mínimo histórico
 			existingID,
 		)
-
+		
 		if err != nil {
 			log.Printf("Error al actualizar snapshot existente: %v", err)
 		} else {
-			log.Printf("Snapshot actualizado exitosamente para el día %s con nuevo valor %.2f", 
-				dayStr, totalValue)
+			log.Printf("Snapshot actualizado exitosamente")
+			return err
 		}
-
-		return err
-	} else if err != sql.ErrNoRows {
-		// Error al consultar
-		log.Printf("Error al verificar snapshot existente: %v", err)
-		return err
+	} else if err != nil && err != sql.ErrNoRows {
+		log.Printf("Error al consultar snapshots existentes: %v", err)
+	} else {
+		log.Printf("No existe un snapshot para este intervalo, creando uno nuevo")
 	}
 
-	// No existe un snapshot para este día, insertamos uno nuevo
-	log.Printf("Creando nuevo snapshot para el día %s con valor %.2f", dayStr, totalValue)
+	// Si no existe un snapshot para este intervalo o hubo un error al actualizar, creamos uno nuevo
+	log.Printf("Creando nuevo snapshot con ID: %s, valor: %.2f, max: %.2f, min: %.2f", 
+		snapshotID, totalValue, newMaxValue, newMinValue)
 	
 	insertQuery := `
-		INSERT INTO investment_snapshots (id, user_id, date, total_value, total_invested, profit, profit_percentage)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO investment_snapshots (id, user_id, date, total_value, total_invested, profit, profit_percentage, max_value, min_value)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err = a.db.Exec(
@@ -175,12 +203,14 @@ func (a *cryptoRepositoryAdapter) SaveInvestmentSnapshot(userID string, totalVal
 		totalInvested,
 		profit,
 		profitPercentage,
+		newMaxValue,
+		newMinValue,
 	)
 
 	if err != nil {
 		log.Printf("Error al guardar nuevo snapshot: %v", err)
 	} else {
-		log.Printf("Nuevo snapshot creado exitosamente para el día %s con valor %.2f", dayStr, totalValue)
+		log.Printf("Nuevo snapshot creado exitosamente para el intervalo %s con valor %.2f", intervalStr, totalValue)
 	}
 
 	return err
@@ -798,12 +828,12 @@ func (p *PriceUpdater) GetFormattedInvestmentHistorySince(userID string, since t
 		return snapshots[i].Date.Before(snapshots[j].Date)
 	})
 
-	// Crear un mapa para agrupar por día (YYYY-MM-DD)
+	// Crear un mapa para agrupar por día
 	dayMap := make(map[string]models.InvestmentSnapshot)
 
 	// Obtener la fecha actual truncada a día
-	currentDay := time.Now().Truncate(24 * time.Hour)
-	currentDayKey := currentDay.Format("2006-01-02")
+	currentTime := time.Now()
+	currentDayKey := currentTime.Format("2006-01-02")
 
 	// Procesar cada snapshot
 	for _, snapshot := range snapshots {
@@ -863,9 +893,67 @@ func (p *PriceUpdater) GetFormattedInvestmentHistorySince(userID string, since t
 	for _, item := range snapshotsList {
 		snapshot := item.snapshot
 		orderedSnapshots = append(orderedSnapshots, snapshot)
-		// Mostrar la fecha en formato dd/mm en las etiquetas
-		labels = append(labels, snapshot.Date.Format("02/01"))
+		// Mostrar la fecha y hora en formato dd/mm HH:MM en las etiquetas
+		labels = append(labels, snapshot.Date.Format("02/01 15:04"))
 		values = append(values, snapshot.TotalValue)
+	}
+
+	// Crear arrays para valores máximos y mínimos
+	var maxValues []float64
+	var minValues []float64
+
+	// Mapa para agrupar snapshots por intervalos de 5 minutos y calcular max/min
+	intervalMaxMin := make(map[string]struct {
+		max float64
+		min float64
+	})
+
+	// Primero, calcular los valores máximo y mínimo para cada intervalo
+	for _, snapshot := range orderedSnapshots {
+		// Truncar la fecha al intervalo de 5 minutos
+		intervalSeconds := 5 * 60
+		intervalTime := snapshot.Date.Truncate(time.Duration(intervalSeconds) * time.Second)
+		intervalKey := intervalTime.Format("2006-01-02 15:04")
+		
+		values, exists := intervalMaxMin[intervalKey]
+		
+		if !exists {
+			// Primera vez que vemos este intervalo
+			intervalMaxMin[intervalKey] = struct {
+				max float64
+				min float64
+			}{
+				max: snapshot.TotalValue,
+				min: snapshot.TotalValue,
+			}
+		} else {
+			// Actualizar máximo y mínimo para este intervalo
+			if snapshot.TotalValue > values.max {
+				values.max = snapshot.TotalValue
+				intervalMaxMin[intervalKey] = values
+			}
+			if snapshot.TotalValue < values.min {
+				values.min = snapshot.TotalValue
+				intervalMaxMin[intervalKey] = values
+			}
+		}
+	}
+
+	// Ahora, asignar los valores máximo y mínimo a cada snapshot
+	for i, snapshot := range orderedSnapshots {
+		// Truncar la fecha al intervalo de 5 minutos
+		intervalSeconds := 5 * 60
+		intervalTime := snapshot.Date.Truncate(time.Duration(intervalSeconds) * time.Second)
+		intervalKey := intervalTime.Format("2006-01-02 15:04")
+		
+		values := intervalMaxMin[intervalKey]
+		
+		// Asignar valores máximo y mínimo
+		orderedSnapshots[i].MaxValue = values.max
+		orderedSnapshots[i].MinValue = values.min
+		
+		maxValues = append(maxValues, values.max)
+		minValues = append(minValues, values.min)
 	}
 
 	// Crear el objeto de respuesta
@@ -873,6 +961,8 @@ func (p *PriceUpdater) GetFormattedInvestmentHistorySince(userID string, since t
 		"snapshots": orderedSnapshots,
 		"labels":    labels,
 		"values":    values,
+		"max_values": maxValues,
+		"min_values": minValues,
 	}
 
 	return result, nil

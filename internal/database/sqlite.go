@@ -165,5 +165,7 @@ func InitDB() error {
 		return err
 	}
 
-	return nil
+	// Ejecutar migraciones para actualizar el esquema
+	err = RunMigrations()
+	return err
 }

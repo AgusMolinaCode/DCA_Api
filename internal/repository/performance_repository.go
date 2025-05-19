@@ -1,6 +1,10 @@
 package repository
 
 import (
+	"database/sql"
+	"fmt"
+	"time"
+	
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/models"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/services"
 )
@@ -146,4 +150,87 @@ func (r *CryptoRepository) GetPerformance(userID string) (*models.Performance, e
 		TopGainer: topGainer,
 		TopLoser:  topLoser,
 	}, nil
+}
+
+// GetUserPerformance obtiene el rendimiento de las inversiones del usuario desde una fecha específica
+// Esta función es un wrapper para GetPerformance que permite su uso desde los handlers
+func GetUserPerformance(db *sql.DB, userID string, startDate time.Time) (*models.Performance, error) {
+	// Crear una instancia del repositorio de criptomonedas
+	repo := NewCryptoRepository(db)
+	
+	// Llamar a la función GetPerformance para obtener el rendimiento
+	performance, err := repo.GetPerformance(userID)
+	if err != nil {
+		return nil, fmt.Errorf("error al obtener el rendimiento: %v", err)
+	}
+	
+	// Nota: Actualmente no estamos filtrando por startDate, pero podríamos implementarlo
+	// en una versión futura para mostrar el rendimiento desde una fecha específica
+	
+	return performance, nil
+}
+
+// GetUserHoldings obtiene las tenencias actuales del usuario
+// Esta función utiliza el dashboard para obtener las tenencias
+func GetUserHoldings(db *sql.DB, userID string) ([]models.CryptoDashboard, error) {
+	// Crear una instancia del repositorio de criptomonedas
+	repo := NewCryptoRepository(db)
+	
+	// Obtener el dashboard que ya contiene las tenencias
+	dashboard, err := repo.GetCryptoDashboard(userID)
+	if err != nil {
+		return nil, fmt.Errorf("error al obtener las tenencias: %v", err)
+	}
+	
+	// Filtrar solo las criptomonedas con tenencias positivas
+	holdings := make([]models.CryptoDashboard, 0)
+	for _, crypto := range dashboard {
+		if crypto.Holdings > 0 {
+			holdings = append(holdings, crypto)
+		}
+	}
+	
+	return holdings, nil
+}
+
+// GetUserCurrentBalance obtiene el balance actual del usuario
+// Esta función calcula el balance sumando el valor actual de todas las tenencias
+func GetUserCurrentBalance(db *sql.DB, userID string) (*models.Balance, error) {
+	// Crear una instancia del repositorio de criptomonedas
+	repo := NewCryptoRepository(db)
+	
+	// Obtener el dashboard que contiene las tenencias
+	dashboard, err := repo.GetCryptoDashboard(userID)
+	if err != nil {
+		return nil, fmt.Errorf("error al obtener el balance: %v", err)
+	}
+	
+	// Calcular el balance total y el total invertido
+	var totalBalance, totalInvested, totalProfit float64
+	for _, crypto := range dashboard {
+		// Calcular el valor actual de las tenencias
+		currentValue := crypto.CurrentPrice * crypto.Holdings
+		totalBalance += currentValue
+		totalInvested += crypto.TotalInvested
+	}
+	
+	// Calcular la ganancia/pérdida total
+	totalProfit = totalBalance - totalInvested
+	
+	// Calcular el porcentaje de ganancia/pérdida
+	var profitPercentage float64
+	if totalInvested > 0 {
+		profitPercentage = (totalProfit / totalInvested) * 100
+	}
+	
+	// Crear y devolver el objeto de balance
+	balance := &models.Balance{
+		TotalBalance:      totalBalance,
+		TotalInvested:     totalInvested,
+		TotalProfit:       totalProfit,
+		ProfitPercentage:  profitPercentage,
+		LastUpdated:       time.Now(),
+	}
+	
+	return balance, nil
 }
