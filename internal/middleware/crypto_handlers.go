@@ -23,6 +23,15 @@ func InitCrypto() {
 func GetInvestmentHistory(c *gin.Context) {
 	userID := c.GetString("userId")
 
+	// Verificar qué tipo de filtro de tiempo se quiere aplicar
+	showAllStr := c.DefaultQuery("show_all", "false")
+	show7dStr := c.DefaultQuery("show_7d", "false")
+	show30dStr := c.DefaultQuery("show_30d", "false")
+	
+	showAll := showAllStr == "true"
+	show7d := show7dStr == "true"
+	show30d := show30dStr == "true"
+	
 	// Obtener los minutos hacia atrás que queremos mostrar (por defecto 60 minutos)
 	minutesStr := c.DefaultQuery("minutes", "60")
 	minutes, err := strconv.Atoi(minutesStr)
@@ -31,7 +40,20 @@ func GetInvestmentHistory(c *gin.Context) {
 	}
 
 	// Calcular la fecha desde la que queremos los datos
-	since := time.Now().Add(-time.Duration(minutes) * time.Minute)
+	var since time.Time
+	if showAll {
+		// Si se quieren todos los snapshots, usar una fecha muy antigua
+		since = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	} else if show7d {
+		// Si se quieren los snapshots de los últimos 7 días
+		since = time.Now().AddDate(0, 0, -7)
+	} else if show30d {
+		// Si se quieren los snapshots de los últimos 30 días
+		since = time.Now().AddDate(0, 0, -30)
+	} else {
+		// Si solo se quieren los más recientes, usar la fecha calculada
+		since = time.Now().Add(-time.Duration(minutes) * time.Minute)
+	}
 
 	// Paso 1: Guardar o actualizar el snapshot actual
 	// Obtener el valor actual de las inversiones
@@ -41,9 +63,9 @@ func GetInvestmentHistory(c *gin.Context) {
 		// Generar un ID único para el snapshot
 		snapshotID := fmt.Sprintf("snapshot_%d", time.Now().UnixNano())
 
-		// Truncar a intervalos de 5 minutos
+		// Truncar a intervalos de 1 hora
 		currentTime := time.Now()
-		intervalSeconds := 5 * 60
+		intervalSeconds := 60 * 60 // 60 minutos * 60 segundos = 1 hora
 		currentInterval := currentTime.Truncate(time.Duration(intervalSeconds) * time.Second)
 
 		// Consultar si ya existe un snapshot para este intervalo
