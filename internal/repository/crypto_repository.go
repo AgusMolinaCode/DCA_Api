@@ -166,7 +166,7 @@ func (r *CryptoRepository) UpdateTransaction(transaction models.CryptoTransactio
 	err := r.db.QueryRow("SELECT user_id FROM crypto_transactions WHERE id = ?", transaction.ID).Scan(&existingUserId)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("transacción no encontrada")
+			return fmt.Errorf("transacción no encontrada.")
 		}
 		return err
 	}
@@ -595,13 +595,13 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 func GetUserDashboard(db *sql.DB, userID string) ([]models.CryptoDashboard, error) {
 	// Crear una instancia del repositorio de criptomonedas
 	repo := NewCryptoRepository(db)
-	
+
 	// Llamar a la función GetCryptoDashboard para obtener el dashboard
 	dashboard, err := repo.GetCryptoDashboard(userID)
 	if err != nil {
 		return nil, fmt.Errorf("error al obtener el dashboard: %v", err)
 	}
-	
+
 	// Asegurarse de que los precios actuales sean diferentes de los precios de compra
 	// según lo mencionado en la memoria sobre el problema identificado en el dashboard
 	for i := range dashboard {
@@ -611,11 +611,11 @@ func GetUserDashboard(db *sql.DB, userID string) ([]models.CryptoDashboard, erro
 			if err == nil && cryptoData != nil {
 				// Actualizar el precio actual con el precio obtenido de la API
 				dashboard[i].CurrentPrice = cryptoData.Raw[dashboard[i].Ticker]["USD"].PRICE
-				
+
 				// Recalcular la ganancia/pérdida
 				currentValue := dashboard[i].CurrentPrice * dashboard[i].Holdings
 				dashboard[i].CurrentProfit = currentValue - dashboard[i].TotalInvested
-				
+
 				// Recalcular el porcentaje de ganancia/pérdida
 				if dashboard[i].TotalInvested > 0 {
 					dashboard[i].ProfitPercent = (dashboard[i].CurrentProfit / dashboard[i].TotalInvested) * 100
@@ -623,7 +623,7 @@ func GetUserDashboard(db *sql.DB, userID string) ([]models.CryptoDashboard, erro
 			}
 		}
 	}
-	
+
 	return dashboard, nil
 }
 
@@ -1083,10 +1083,10 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 	currentInterval := currentTime.Truncate(time.Duration(intervalSeconds) * time.Second)
 	// Calcular el siguiente intervalo
 	nextInterval := currentInterval.Add(time.Duration(intervalSeconds) * time.Second)
-	
+
 	// Formatear para mostrar en logs
 	intervalStr := currentInterval.Format("2006-01-02 15:04")
-	
+
 	// Registrar la operación para depuración
 	log.Printf("=== INICIO SaveInvestmentSnapshot para usuario %s a las %s ===", userID, currentTime.Format("2006-01-02 15:04:05"))
 	log.Printf("Guardando nuevo snapshot para el intervalo %s con valor: %.2f", intervalStr, totalValue)
@@ -1110,7 +1110,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 
 	if err == nil && existingID != "" {
 		// Ya existe un snapshot para este intervalo
-		log.Printf("Encontrado snapshot existente (ID: %s) con max=%.2f, min=%.2f", 
+		log.Printf("Encontrado snapshot existente (ID: %s) con max=%.2f, min=%.2f",
 			existingID, maxValue, minValue)
 
 		// Actualizar valores máximo y mínimo
@@ -1137,13 +1137,13 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 		`
 
 		_, err = r.db.Exec(
-			updateQuery, 
-			totalValue, 
-			totalInvested, 
-			profit, 
-			profitPercentage, 
-			newMaxValue, 
-			newMinValue, 
+			updateQuery,
+			totalValue,
+			totalInvested,
+			profit,
+			profitPercentage,
+			newMaxValue,
+			newMinValue,
 			existingID,
 		)
 
@@ -1152,7 +1152,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 			return err
 		}
 
-		log.Printf("Snapshot actualizado exitosamente con valor=%.2f, max=%.2f, min=%.2f", 
+		log.Printf("Snapshot actualizado exitosamente con valor=%.2f, max=%.2f, min=%.2f",
 			totalValue, newMaxValue, newMinValue)
 		return nil
 	} else if err != nil && err != sql.ErrNoRows {
@@ -1168,23 +1168,23 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 		`
 
 		_, err = r.db.Exec(
-			insertQuery, 
-			snapshotID, 
-			userID, 
-			currentInterval, 
-			totalValue, 
-			totalInvested, 
-			profit, 
-			profitPercentage, 
+			insertQuery,
+			snapshotID,
+			userID,
+			currentInterval,
+			totalValue,
+			totalInvested,
+			profit,
+			profitPercentage,
 			totalValue, // max_value inicial = valor actual
 			totalValue, // min_value inicial = valor actual
 		)
-		
+
 		if err != nil {
 			log.Printf("Error al crear nuevo snapshot: %v", err)
 			return err
 		}
-		
+
 		log.Printf("Snapshot creado exitosamente con ID: %s, valor: %.2f", snapshotID, totalValue)
 		return nil
 	}
@@ -1223,7 +1223,7 @@ func (r *CryptoRepository) GetInvestmentHistorySince(userID string, since time.T
 	for rows.Next() {
 		var snapshot models.InvestmentSnapshot
 		var minuteStr string
-		
+
 		err := rows.Scan(
 			&snapshot.ID,
 			&snapshot.UserID,
