@@ -17,11 +17,12 @@ func (r *CryptoRepository) SaveInvestmentSnapshotWithMaxMin(userID string, total
 		return nil
 	}
 
-	// Obtener la fecha actual y truncarla al intervalo de 5 minutos
+	// Obtener la fecha actual y truncarla al intervalo diario (24 horas)
 	currentTime := time.Now()
-	intervalSeconds := 5 * 60
-	currentInterval := currentTime.Truncate(time.Duration(intervalSeconds) * time.Second)
-	nextInterval := currentInterval.Add(time.Duration(intervalSeconds) * time.Second)
+	// Truncar al inicio del día (00:00:00)
+	currentInterval := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), 0, 0, 0, 0, currentTime.Location())
+	// Calcular el siguiente día
+	nextInterval := currentInterval.AddDate(0, 0, 1)
 
 	// Formatear para mostrar en logs
 	intervalStr := currentInterval.Format("2006-01-02 15:04")
@@ -173,5 +174,3 @@ func (r *CryptoRepository) GetInvestmentSnapshotsWithMaxMin(userID string, since
 
 	return snapshots, nil
 }
-
-

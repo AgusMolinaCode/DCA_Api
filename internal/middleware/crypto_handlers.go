@@ -62,11 +62,11 @@ func GetInvestmentHistory(c *gin.Context) {
 	if err == nil && holdings.TotalCurrentValue > 0 {
 		// Generar un ID único para el snapshot
 		snapshotID := fmt.Sprintf("snapshot_%d", time.Now().UnixNano())
-
-		// Truncar a intervalos de 1 hora
+		// Obtener la hora actual y truncarla a intervalos de 24 horas (diarios)
+		// (esto crea un punto de referencia para agrupar los snapshots por día)
 		currentTime := time.Now()
-		intervalSeconds := 60 * 60 // 60 minutos * 60 segundos = 1 hora
-		currentInterval := currentTime.Truncate(time.Duration(intervalSeconds) * time.Second)
+		// Truncar al inicio del día (00:00:00)
+		currentInterval := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), 0, 0, 0, 0, currentTime.Location())
 
 		// Consultar si ya existe un snapshot para este intervalo
 		queryExisting := `
@@ -78,7 +78,8 @@ func GetInvestmentHistory(c *gin.Context) {
 			LIMIT 1
 		`
 
-		nextInterval := currentInterval.Add(time.Duration(intervalSeconds) * time.Second)
+		// Calcular el siguiente día (intervalo de 24 horas)
+		nextInterval := currentInterval.AddDate(0, 0, 1)
 
 		var existingID string
 		var maxValue, minValue float64

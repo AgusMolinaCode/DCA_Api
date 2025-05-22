@@ -1,0 +1,7 @@
+GET https://examples.http-client.intellij.net/get
+User-Agent: IntelliJ HTTP Client/GoLand 2025.1.1
+Accept-Encoding: br, deflate, gzip, x-gzip
+Accept: */*
+
+###
+
