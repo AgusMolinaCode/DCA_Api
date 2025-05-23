@@ -3,7 +3,6 @@ package database
 import (
 	"database/sql"
 	"os"
-	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -17,7 +16,7 @@ func InitDB() error {
 	}
 
 	var err error
-	DB, err = sql.Open("sqlite3", filepath.Join("database", "users.db"))
+	DB, err = sql.Open("sqlite3", "dca.db")
 	if err != nil {
 		return err
 	}

@@ -67,9 +67,10 @@ func GetTransactionWithDetails(userID string, transactionID string) (*models.Tra
 
 // GetTransaction obtiene una transacción por su ID
 func GetTransaction(transactionID string) (*models.CryptoTransaction, error) {
-	// Esta función debería implementarse para obtener una transacción por su ID
-	// Por ahora, devolvemos un error indicando que no está implementada
-	return nil, ErrNotImplemented
+	if cryptoRepo == nil {
+		return nil, ErrRepositoryNotInitialized
+	}
+	return cryptoRepo.GetTransaction(transactionID)
 }
 
 // UpdateTransaction actualiza una transacción existente

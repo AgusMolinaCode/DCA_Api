@@ -9,7 +9,7 @@ import (
 	"strconv"
 )
 
-// CreateTransaction crea una nueva transacción para el usuario autenticado
+// CreateTransaction crea una nueva transacciu00f3n para el usuario autenticado
 func CreateTransaction(c *gin.Context) {
 	var transaction models.CryptoTransaction
 	if err := c.ShouldBindJSON(&transaction); err != nil {
@@ -17,16 +17,16 @@ func CreateTransaction(c *gin.Context) {
 		return
 	}
 
-	// Validar que el usuario esté autenticado
-	user, exists := c.Get("user")
+	// Obtener el ID del usuario del contexto
+	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
 		return
 	}
 
-	// Convertir el usuario a modelo
-	userModel := user.(*models.User)
-	transaction.UserID = userModel.ID
+	// Convertir el ID a string
+	userIDStr := userID.(string)
+	transaction.UserID = userIDStr
 
 	// Validar que el ticker exista
 	if !repository.CryptoExists(transaction.Ticker) {
@@ -34,39 +34,39 @@ func CreateTransaction(c *gin.Context) {
 		return
 	}
 
-	// Crear la transacción
+	// Crear la transacciu00f3n
 	if err := repository.CreateTransaction(&transaction); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Actualizar el balance del usuario
-	if err := repository.UpdateUserBalance(userModel.ID, transaction.Amount*transaction.PurchasePrice); err != nil {
+	if err := repository.UpdateUserBalance(userIDStr, transaction.Amount*transaction.PurchasePrice); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al actualizar balance"})
 		return
 	}
 
-	// Crear snapshot automático (versión simplificada)
-	// TODO: Implementar la creación real del snapshot
-	log.Printf("Creando snapshot para usuario %s", userModel.ID)
+	// Crear snapshot automu00e1tico (versiu00f3n simplificada)
+	// TODO: Implementar la creaciu00f3n real del snapshot
+	log.Printf("Creando snapshot para usuario %s", userIDStr)
 
-	c.JSON(http.StatusCreated, gin.H{"message": "Transacción creada exitosamente", "transaction": transaction})
+	c.JSON(http.StatusCreated, gin.H{"message": "Transacciu00f3n creada exitosamente", "transaction": transaction})
 }
 
 // GetUserTransactions obtiene todas las transacciones del usuario con detalles adicionales
 func GetUserTransactions(c *gin.Context) {
-	// Validar que el usuario esté autenticado
-	user, exists := c.Get("user")
+	// Obtener el ID del usuario del contexto
+	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
 		return
 	}
 
-	// Convertir el usuario a modelo
-	userModel := user.(*models.User)
+	// Convertir el ID a string
+	userIDStr := userID.(string)
 
 	// Obtener transacciones con detalles
-	transactions, err := repository.GetUserTransactionsWithDetails(userModel.ID)
+	transactions, err := repository.GetUserTransactionsWithDetails(userIDStr)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -75,23 +75,23 @@ func GetUserTransactions(c *gin.Context) {
 	c.JSON(http.StatusOK, transactions)
 }
 
-// GetTransactionDetails obtiene los detalles de una transacción específica
+// GetTransactionDetails obtiene los detalles de una transacciu00f3n especu00edfica
 func GetTransactionDetails(c *gin.Context) {
-	// Validar que el usuario esté autenticado
-	user, exists := c.Get("user")
+	// Obtener el ID del usuario del contexto
+	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
 		return
 	}
 
-	// Convertir el usuario a modelo
-	userModel := user.(*models.User)
+	// Convertir el ID a string
+	userIDStr := userID.(string)
 
-	// El ID de la transacción se obtiene directamente del parámetro de la URL
+	// El ID de la transacciu00f3n se obtiene directamente del paru00e1metro de la URL
 	transactionID := c.Param("id")
 
-	// Obtener detalles de la transacción
-	transaction, err := repository.GetTransactionWithDetails(userModel.ID, transactionID)
+	// Obtener detalles de la transacciu00f3n
+	transaction, err := repository.GetTransactionWithDetails(userIDStr, transactionID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -100,30 +100,30 @@ func GetTransactionDetails(c *gin.Context) {
 	c.JSON(http.StatusOK, transaction)
 }
 
-// UpdateTransaction actualiza una transacción existente
+// UpdateTransaction actualiza una transacciu00f3n existente
 func UpdateTransaction(c *gin.Context) {
-	// Validar que el usuario esté autenticado
-	user, exists := c.Get("user")
+	// Obtener el ID del usuario del contexto
+	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
 		return
 	}
 
-	// Convertir el usuario a modelo
-	userModel := user.(*models.User)
+	// Convertir el ID a string
+	userIDStr := userID.(string)
 
-	// El ID de la transacción se obtiene directamente del parámetro de la URL
+	// El ID de la transacciu00f3n se obtiene directamente del paru00e1metro de la URL
 	transactionID := c.Param("id")
 
-	// Verificar que la transacción pertenezca al usuario
+	// Verificar que la transacciu00f3n pertenezca al usuario
 	transaction, err := repository.GetTransaction(transactionID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if transaction.UserID != userModel.ID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para modificar esta transacción"})
+	if transaction.UserID != userIDStr {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para modificar esta transacciu00f3n"})
 		return
 	}
 
@@ -134,102 +134,102 @@ func UpdateTransaction(c *gin.Context) {
 		return
 	}
 
-	// Actualizar la transacción
+	// Actualizar la transacciu00f3n
 	updatedTransaction.ID = transactionID
-	updatedTransaction.UserID = userModel.ID
+	updatedTransaction.UserID = userIDStr
 	if err := repository.UpdateTransaction(&updatedTransaction); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Crear snapshot automático (versión simplificada)
-	// TODO: Implementar la creación real del snapshot
-	log.Printf("Creando snapshot para usuario %s", userModel.ID)
+	// Crear snapshot automu00e1tico (versiu00f3n simplificada)
+	// TODO: Implementar la creaciu00f3n real del snapshot
+	log.Printf("Creando snapshot para usuario %s", userIDStr)
 
-	c.JSON(http.StatusOK, gin.H{"message": "Transacción actualizada exitosamente", "transaction": updatedTransaction})
+	c.JSON(http.StatusOK, gin.H{"message": "Transacciu00f3n actualizada exitosamente", "transaction": updatedTransaction})
 }
 
-// DeleteTransaction elimina una transacción existente
+// DeleteTransaction elimina una transacciu00f3n existente
 func DeleteTransaction(c *gin.Context) {
-	// Validar que el usuario esté autenticado
-	user, exists := c.Get("user")
+	// Obtener el ID del usuario del contexto
+	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
 		return
 	}
 
-	// Convertir el usuario a modelo
-	userModel := user.(*models.User)
+	// Convertir el ID a string
+	userIDStr := userID.(string)
 
-	// El ID de la transacción se obtiene directamente del parámetro de la URL
+	// El ID de la transacciu00f3n se obtiene directamente del paru00e1metro de la URL
 	transactionID := c.Param("id")
 
-	// Verificar que la transacción pertenezca al usuario
+	// Verificar que la transacciu00f3n pertenezca al usuario
 	transaction, err := repository.GetTransaction(transactionID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if transaction.UserID != userModel.ID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para eliminar esta transacción"})
+	if transaction.UserID != userIDStr {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para eliminar esta transacciu00f3n"})
 		return
 	}
 
-	// Eliminar la transacción
-	if err := repository.DeleteTransaction(userModel.ID, transactionID); err != nil {
+	// Eliminar la transacciu00f3n
+	if err := repository.DeleteTransaction(userIDStr, transactionID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Crear snapshot automático (versión simplificada)
-	// TODO: Implementar la creación real del snapshot
-	log.Printf("Creando snapshot para usuario %s", userModel.ID)
+	// Crear snapshot automu00e1tico (versiu00f3n simplificada)
+	// TODO: Implementar la creaciu00f3n real del snapshot
+	log.Printf("Creando snapshot para usuario %s", userIDStr)
 
-	c.JSON(http.StatusOK, gin.H{"message": "Transacción eliminada exitosamente"})
+	c.JSON(http.StatusOK, gin.H{"message": "Transacciu00f3n eliminada exitosamente"})
 }
 
-// DeleteTransactionsByTicker elimina todas las transacciones de un ticker específico
+// DeleteTransactionsByTicker elimina todas las transacciones de un ticker especu00edfico
 func DeleteTransactionsByTicker(c *gin.Context) {
-	// Validar que el usuario esté autenticado
-	user, exists := c.Get("user")
+	// Obtener el ID del usuario del contexto
+	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
 		return
 	}
 
-	// Convertir el usuario a modelo
-	userModel := user.(*models.User)
+	// Convertir el ID a string
+	userIDStr := userID.(string)
 
 	// Obtener ticker de la URL
 	ticker := c.Param("ticker")
 
 	// Eliminar todas las transacciones del ticker
-	if err := repository.DeleteTransactionsByTicker(userModel.ID, ticker); err != nil {
+	if err := repository.DeleteTransactionsByTicker(userIDStr, ticker); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Crear snapshot automático (versión simplificada)
-	// TODO: Implementar la creación real del snapshot
-	log.Printf("Creando snapshot para usuario %s", userModel.ID)
+	// Crear snapshot automu00e1tico (versiu00f3n simplificada)
+	// TODO: Implementar la creaciu00f3n real del snapshot
+	log.Printf("Creando snapshot para usuario %s", userIDStr)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Todas las transacciones de " + ticker + " han sido eliminadas"})
 }
 
-// GetRecentTransactions obtiene las transacciones más recientes del usuario
+// GetRecentTransactions obtiene las transacciones mu00e1s recientes del usuario
 func GetRecentTransactions(c *gin.Context) {
-	// Validar que el usuario esté autenticado
-	user, exists := c.Get("user")
+	// Obtener el ID del usuario del contexto
+	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
 		return
 	}
 
-	// Convertir el usuario a modelo
-	userModel := user.(*models.User)
+	// Convertir el ID a string
+	userIDStr := userID.(string)
 
-	// Obtener límite de la URL o usar valor predeterminado
+	// Obtener lu00edmite de la URL o usar valor predeterminado
 	limitStr := c.DefaultQuery("limit", "5")
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit <= 0 {
@@ -237,7 +237,7 @@ func GetRecentTransactions(c *gin.Context) {
 	}
 
 	// Obtener transacciones recientes
-	transactions, err := repository.GetRecentTransactions(userModel.ID, limit)
+	transactions, err := repository.GetRecentTransactions(userIDStr, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

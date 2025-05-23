@@ -48,9 +48,6 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.GET("/holdings", middleware.GetHoldings)
 		protected.GET("/current-balance", middleware.GetCurrentBalance)
 		protected.GET("/investment-history", middleware.GetInvestmentHistory)
-		// TODO: Implementar estas funciones correctamente
-		// protected.POST("/force-snapshot", middleware.ForceCreateSnapshot)
-		// protected.POST("/force-snapshot-with-date", middleware.ForceCreateSnapshotWithDate)
 
 		// Nuevas rutas para bolsas
 		protected.POST("/bolsas", middleware.CreateBolsa)
@@ -65,7 +62,7 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.GET("/bolsas/tags/:tag", middleware.GetBolsasByTag)
 
 		// Agregar la ruta para balance en tiempo real
-		protected.GET("/live-balance", middleware.GetLiveBalance)
+		protected.GET("/live-balance", middleware.GetDashboardLiveBalance)
 		
 		// Ruta para eliminar snapshots de inversión
 		protected.DELETE("/investment/snapshots/:id", middleware.DeleteInvestmentSnapshot) 
