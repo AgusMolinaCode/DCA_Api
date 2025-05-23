@@ -44,6 +44,9 @@ func main() {
 	// Inicializar auth
 	middleware.InitAuth()
 
+	// Inicializar repositorio de criptomonedas
+	middleware.InitCrypto()
+
 	// Iniciar el servicio de actualización de precios (snapshots cada minuto)
 	log.Println("Iniciando servicio de actualización de precios...")
 	priceUpdater = services.NewPriceUpdater(time.Minute) // El intervalo se ignora internamente

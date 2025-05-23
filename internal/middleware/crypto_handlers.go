@@ -17,6 +17,8 @@ var cryptoRepo *repository.CryptoRepository
 
 func InitCrypto() {
 	cryptoRepo = repository.NewCryptoRepository(database.DB)
+	// También inicializar el repositorio en el paquete repository
+	repository.InitRepositories(database.DB)
 }
 
 // GetInvestmentHistory obtiene el historial de valores de inversión
@@ -27,10 +29,15 @@ func GetInvestmentHistory(c *gin.Context) {
 	showAllStr := c.DefaultQuery("show_all", "false")
 	show7dStr := c.DefaultQuery("show_7d", "false")
 	show30dStr := c.DefaultQuery("show_30d", "false")
+	showTodayStr := c.DefaultQuery("show_today", "false")
 	
 	showAll := showAllStr == "true"
 	show7d := show7dStr == "true"
 	show30d := show30dStr == "true"
+	showToday := showTodayStr == "true"
+	
+	// Verificar si no se proporcionó ningún parámetro
+	noParamSpecified := !showAll && !show7d && !show30d && !showToday
 	
 	// Obtener los minutos hacia atrás que queremos mostrar (por defecto 60 minutos)
 	minutesStr := c.DefaultQuery("minutes", "60")
@@ -50,6 +57,11 @@ func GetInvestmentHistory(c *gin.Context) {
 	} else if show30d {
 		// Si se quieren los snapshots de los últimos 30 días
 		since = time.Now().AddDate(0, 0, -30)
+	} else if showToday || noParamSpecified {
+		// Si se quieren los snapshots del día actual o no se especificó ningún parámetro
+		// Obtener el inicio del día actual (00:00:00)
+		now := time.Now()
+		since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	} else {
 		// Si solo se quieren los más recientes, usar la fecha calculada
 		since = time.Now().Add(-time.Duration(minutes) * time.Minute)
