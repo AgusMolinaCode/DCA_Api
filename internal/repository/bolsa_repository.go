@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"log"
 	"time"
 
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/models"
@@ -199,8 +200,11 @@ func (r *BolsaRepository) GetBolsasByUserID(userID string) ([]models.Bolsa, erro
 			cryptoData, err := services.GetCryptoPriceFromCoinGecko(asset.Ticker)
 			if err != nil {
 				// Si no podemos obtener el precio actual, usamos el precio de compra
+				// pero registramos el error para depuraciu00f3n
+				log.Printf("Error al obtener precio actual para %s: %v", asset.Ticker, err)
 				asset.CurrentPrice = asset.PurchasePrice
 			} else {
+				// Siempre usar el precio actual de la API
 				asset.CurrentPrice = cryptoData.Price
 			}
 

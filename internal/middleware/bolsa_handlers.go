@@ -70,7 +70,66 @@ func GetUserBolsas(c *gin.Context) {
 		return
 	}
 
+	// Actualizar los precios actuales de todos los activos en todas las bolsas
+	for i := range bolsas {
+		updateCryptoPrices(&bolsas[i])
+	}
+
 	c.JSON(http.StatusOK, gin.H{"bolsas": bolsas})
+}
+
+// updateCryptoPrices actualiza los precios actuales de las criptomonedas en una bolsa
+func updateCryptoPrices(bolsa *models.Bolsa) {
+	if bolsa == nil || len(bolsa.Assets) == 0 {
+		return
+	}
+
+	// Recopilar todos los tickers únicos de la bolsa
+	tickers := make([]string, 0)
+	tickerMap := make(map[string]bool)
+	for _, asset := range bolsa.Assets {
+		if !tickerMap[asset.Ticker] {
+			tickers = append(tickers, asset.Ticker)
+			tickerMap[asset.Ticker] = true
+		}
+	}
+
+	// Obtener los precios actuales de todas las criptomonedas en una sola llamada a la API
+	prices, err := services.GetMultipleCryptoPrices(tickers)
+	if err != nil {
+		log.Printf("Error al obtener precios actuales: %v", err)
+		// Si hay un error, continuamos con los precios existentes
+	} else {
+		// Actualizar el precio actual de cada activo
+		for i := range bolsa.Assets {
+			if currentPrice, exists := prices[bolsa.Assets[i].Ticker]; exists {
+				// Actualizar el precio actual con el valor de la API
+				bolsa.Assets[i].CurrentPrice = currentPrice
+				log.Printf("Precio actualizado para %s: %.2f (precio anterior: %.2f)", 
+					bolsa.Assets[i].Ticker, currentPrice, bolsa.Assets[i].PurchasePrice)
+			} else {
+				// Si no encontramos el precio, mantenemos el precio de compra
+				log.Printf("No se encontró precio para %s, manteniendo precio de compra: %.2f", 
+					bolsa.Assets[i].Ticker, bolsa.Assets[i].PurchasePrice)
+			}
+		}
+	}
+
+	// Recalcular valores derivados para todos los activos
+	for i := range bolsa.Assets {
+		bolsa.Assets[i].CurrentValue = bolsa.Assets[i].Amount * bolsa.Assets[i].CurrentPrice
+		bolsa.Assets[i].GainLoss = bolsa.Assets[i].CurrentValue - bolsa.Assets[i].Total
+
+		if bolsa.Assets[i].Total > 0 {
+			bolsa.Assets[i].GainLossPercent = (bolsa.Assets[i].GainLoss / bolsa.Assets[i].Total) * 100
+		}
+	}
+
+	// Recalcular el valor actual total de la bolsa
+	bolsa.CurrentValue = 0
+	for _, asset := range bolsa.Assets {
+		bolsa.CurrentValue += asset.CurrentValue
+	}
 }
 
 // GetBolsaDetails obtiene los detalles de una bolsa específica
@@ -100,6 +159,15 @@ func GetBolsaDetails(c *gin.Context) {
 	if bolsa.UserID != userID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "no tienes permiso para acceder a esta bolsa"})
 		return
+	}
+
+	// Actualizar los precios actuales de todos los activos en la bolsa
+	updateCryptoPrices(bolsa)
+
+	// Imprimir los precios actualizados para depuración
+	log.Printf("Precios actualizados para la bolsa %s:", bolsa.ID)
+	for _, asset := range bolsa.Assets {
+		log.Printf("  - %s: Precio de compra: %.2f, Precio actual: %.2f", asset.Ticker, asset.PurchasePrice, asset.CurrentPrice)
 	}
 
 	// Calcular información de progreso si hay un objetivo establecido
@@ -196,14 +264,23 @@ func AddAssetsToBolsa(c *gin.Context) {
 		// Calcular el valor total del activo
 		asset.Total = asset.Amount * asset.PurchasePrice
 
+		// Recopilar todos los tickers para obtener los precios en una sola llamada
+		tickers := []string{asset.Ticker}
+		
 		// Obtener precio actual y calcular valores derivados
-		cryptoData, err := services.GetCryptoPrice(asset.Ticker)
+		prices, err := services.GetMultipleCryptoPrices(tickers)
 		if err != nil {
 			// Si no se puede obtener el precio actual, usar el precio de compra
 			log.Printf("Error al obtener precio para %s: %v", asset.Ticker, err)
 			asset.CurrentPrice = asset.PurchasePrice
+		} else if currentPrice, exists := prices[asset.Ticker]; exists {
+			// Actualizar el precio actual con el valor de la API
+			asset.CurrentPrice = currentPrice
+			log.Printf("Precio actualizado para %s: %.2f (precio de compra: %.2f)", asset.Ticker, currentPrice, asset.PurchasePrice)
 		} else {
-			asset.CurrentPrice = cryptoData.Raw[asset.Ticker]["USD"].PRICE
+			// Si no encontramos el precio, mantenemos el precio de compra
+			log.Printf("No se encontró precio para %s, manteniendo precio de compra: %.2f", asset.Ticker, asset.PurchasePrice)
+			asset.CurrentPrice = asset.PurchasePrice
 		}
 
 		asset.CurrentValue = asset.Amount * asset.CurrentPrice
