@@ -440,6 +440,13 @@ func UpdateBolsa(c *gin.Context) {
 						existingAsset.PurchasePrice = updatedAsset.PurchasePrice
 					}
 
+					// Preservar el valor original de image_url a menos que se proporcione explícitamente
+					// El campo image_url solo se debe actualizar cuando se proporciona en la solicitud
+					// y no está vacío
+					if updatedAsset.ImageURL != "" {
+						existingAsset.ImageURL = updatedAsset.ImageURL
+					}
+
 					// Recalcular valores derivados
 					existingAsset.Total = existingAsset.Amount * existingAsset.PurchasePrice
 
