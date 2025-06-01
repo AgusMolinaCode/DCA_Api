@@ -54,6 +54,7 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.GET("/bolsas", middleware.GetUserBolsas)
 		protected.GET("/bolsas/:id", middleware.GetBolsaDetails)
 		protected.POST("/bolsas/:id/assets", middleware.AddAssetsToBolsa)
+		protected.DELETE("/bolsas/:id/assets/:assetId", middleware.RemoveAssetFromBolsa)
 		protected.PUT("/bolsas/:id", middleware.UpdateBolsa)
 		protected.POST("/bolsas/:id/complete", middleware.CompleteBolsaAndTransfer)
 

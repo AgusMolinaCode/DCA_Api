@@ -668,3 +668,27 @@ func (r *BolsaRepository) getAssetsForBolsa(bolsaID string) ([]models.AssetInBol
 
 	return assets, nil
 }
+
+// RemoveAssetFromBolsa elimina un activo de una bolsa por su ID
+func (r *BolsaRepository) RemoveAssetFromBolsa(assetID string, bolsaID string) error {
+	// Iniciar transacción SQL
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	// Eliminar el activo de la base de datos
+	_, err = tx.Exec(
+		`DELETE FROM assets_in_bolsa WHERE id = ? AND bolsa_id = ?`,
+		assetID, bolsaID,
+	)
+
+	return err
+}

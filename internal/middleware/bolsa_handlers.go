@@ -78,6 +78,80 @@ func GetUserBolsas(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"bolsas": bolsas})
 }
 
+// RemoveAssetFromBolsa elimina un activo de una bolsa existente
+func RemoveAssetFromBolsa(c *gin.Context) {
+	// Obtener el ID de la bolsa de los parámetros de la URL
+	bolsaID := c.Param("id")
+	if bolsaID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID de bolsa no proporcionado"})
+		return
+	}
+
+	// Obtener el ID del activo de los parámetros de la URL
+	assetID := c.Param("assetId")
+	if assetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID de activo no proporcionado"})
+		return
+	}
+
+	// Obtener el ID del usuario del contexto
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
+		return
+	}
+
+	// Obtener la bolsa para verificar que pertenece al usuario
+	bolsaRepo := repository.NewBolsaRepository(database.DB)
+	bolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Bolsa no encontrada"})
+		return
+	}
+
+	// Verificar que la bolsa pertenece al usuario
+	if bolsa.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para acceder a esta bolsa"})
+		return
+	}
+
+	// Verificar que el activo existe en la bolsa
+	assetExists := false
+	for _, asset := range bolsa.Assets {
+		if asset.ID == assetID {
+			assetExists = true
+			break
+		}
+	}
+
+	if !assetExists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Activo no encontrado en la bolsa"})
+		return
+	}
+
+	// Eliminar el activo de la bolsa
+	err = bolsaRepo.RemoveAssetFromBolsa(assetID, bolsaID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al eliminar activo de la bolsa: " + err.Error()})
+		return
+	}
+
+	// Obtener la bolsa actualizada con todos los activos
+	updatedBolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener la bolsa actualizada"})
+		return
+	}
+
+	// Actualizar los precios actuales
+	updateCryptoPrices(updatedBolsa)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Activo eliminado exitosamente",
+		"bolsa": updatedBolsa,
+	})
+}
+
 // updateCryptoPrices actualiza los precios actuales de las criptomonedas en una bolsa
 func updateCryptoPrices(bolsa *models.Bolsa) {
 	if bolsa == nil || len(bolsa.Assets) == 0 {
@@ -483,9 +557,9 @@ func UpdateBolsa(c *gin.Context) {
 			}
 
 			if !found {
-				// Si no se encontró el activo, devolver un error
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Activo no encontrado: " + updatedAsset.ID})
-				return
+				// Si no se encontró el activo, registrar un mensaje pero continuar con los demás
+				log.Printf("Advertencia: Activo no encontrado en la bolsa %s: %s. Se ignorará esta actualización.", bolsaID, updatedAsset.ID)
+				continue
 			}
 		}
 	}
