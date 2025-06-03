@@ -211,7 +211,7 @@ func GetBolsaDetails(c *gin.Context) {
 	// Obtener el ID del usuario del contexto
 	userID := c.GetString("userId")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "usuario no autenticado."})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "usuario no autenticado"})
 		return
 	}
 
