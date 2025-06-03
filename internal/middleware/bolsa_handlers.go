@@ -886,6 +886,47 @@ func ManageBolsaTags(c *gin.Context) {
 	})
 }
 
+// DeleteBolsa elimina completamente una bolsa y todos sus elementos asociados
+func DeleteBolsa(c *gin.Context) {
+	// Obtener el ID de la bolsa de los parámetros de la URL
+	bolsaID := c.Param("id")
+	if bolsaID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID de bolsa no proporcionado"})
+		return
+	}
+
+	// Obtener el ID del usuario del contexto
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
+		return
+	}
+
+	// Obtener la bolsa para verificar que pertenece al usuario
+	bolsa, err := bolsaRepo.GetBolsaByID(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Bolsa no encontrada"})
+		return
+	}
+
+	// Verificar que la bolsa pertenece al usuario
+	if bolsa.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No tienes permiso para eliminar esta bolsa"})
+		return
+	}
+
+	// Eliminar la bolsa y todos sus elementos asociados
+	err = bolsaRepo.DeleteBolsa(bolsaID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al eliminar la bolsa: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Bolsa eliminada exitosamente",
+	})
+}
+
 // GetBolsasByTag obtiene todas las bolsas que tienen una etiqueta específica
 func GetBolsasByTag(c *gin.Context) {
 	// Obtener la etiqueta de los parámetros de la URL

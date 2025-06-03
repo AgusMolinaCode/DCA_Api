@@ -56,6 +56,7 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.POST("/bolsas/:id/assets", middleware.AddAssetsToBolsa)
 		protected.DELETE("/bolsas/:id/assets/:assetId", middleware.RemoveAssetFromBolsa)
 		protected.PUT("/bolsas/:id", middleware.UpdateBolsa)
+		protected.DELETE("/bolsas/:id", middleware.DeleteBolsa)
 		protected.POST("/bolsas/:id/complete", middleware.CompleteBolsaAndTransfer)
 
 		// Rutas para etiquetas de bolsas

@@ -692,3 +692,54 @@ func (r *BolsaRepository) RemoveAssetFromBolsa(assetID string, bolsaID string) e
 
 	return err
 }
+
+// DeleteBolsa elimina completamente una bolsa y todos sus activos y reglas asociadas
+func (r *BolsaRepository) DeleteBolsa(bolsaID string) error {
+	// Iniciar transacción SQL
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	// Eliminar todas las etiquetas asociadas a la bolsa
+	_, err = tx.Exec(
+		`DELETE FROM bolsa_tags WHERE bolsa_id = ?`,
+		bolsaID,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Eliminar todas las reglas asociadas a la bolsa
+	_, err = tx.Exec(
+		`DELETE FROM trigger_rules WHERE bolsa_id = ?`,
+		bolsaID,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Eliminar todos los activos asociados a la bolsa
+	_, err = tx.Exec(
+		`DELETE FROM assets_in_bolsa WHERE bolsa_id = ?`,
+		bolsaID,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Finalmente, eliminar la bolsa
+	_, err = tx.Exec(
+		`DELETE FROM bolsas WHERE id = ?`,
+		bolsaID,
+	)
+
+	return err
+}
