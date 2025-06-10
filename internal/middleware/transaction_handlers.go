@@ -20,7 +20,7 @@ func CreateTransaction(c *gin.Context) {
 	// Obtener el ID del usuario del contexto
 	userID, exists := c.Get("userId")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado."})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no autenticado"})
 		return
 	}
 
