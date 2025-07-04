@@ -172,10 +172,8 @@ func Signup(c *gin.Context) {
 	}
 
 	// Verificar si el email ya está registrado
-	mutex.RLock()
-	_, exists := users[signup.Email]
-	mutex.RUnlock()
-	if exists {
+	existingUser, err := userRepo.GetUserByEmail(signup.Email)
+	if err == nil && existingUser != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "El email ya está registrado"})
 		return
 	}
