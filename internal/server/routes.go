@@ -17,6 +17,11 @@ func RegisterRoutes(router *gin.Engine) {
 	middleware.InitCrypto()
 	middleware.InitBolsa() // Inicializar el repositorio de bolsas
 
+	// Health check endpoint
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
+
 	router.POST("/signup", middleware.Signup)
 	router.POST("/login", middleware.Login)
 

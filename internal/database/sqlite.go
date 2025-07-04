@@ -2,22 +2,38 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/lib/pq"
 )
 
 var DB *sql.DB
 
 func InitDB() error {
-	// Crear el directorio database si no existe
-	if err := os.MkdirAll("database", 0755); err != nil {
-		return err
+	// Configurar conexión a PostgreSQL
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		// Configuración por defecto para desarrollo local
+		host := getEnvOrDefault("DB_HOST", "localhost")
+		port := getEnvOrDefault("DB_PORT", "5432")
+		user := getEnvOrDefault("DB_USER", "postgres")
+		password := getEnvOrDefault("DB_PASSWORD", "")
+		dbname := getEnvOrDefault("DB_NAME", "dca_api")
+		sslmode := getEnvOrDefault("DB_SSLMODE", "disable")
+		
+		dbURL = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+			host, port, user, password, dbname, sslmode)
 	}
 
 	var err error
-	DB, err = sql.Open("sqlite3", "dca.db")
+	DB, err = sql.Open("postgres", dbURL)
 	if err != nil {
+		return err
+	}
+
+	// Verificar la conexión
+	if err = DB.Ping(); err != nil {
 		return err
 	}
 
@@ -28,7 +44,7 @@ func InitDB() error {
 		email TEXT UNIQUE NOT NULL,
 		password TEXT NOT NULL,
 		name TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`
 
 	_, err = DB.Exec(createTableSQL)
@@ -46,9 +62,9 @@ func InitDB() error {
 		amount REAL NOT NULL,
 		purchase_price REAL NOT NULL,
 		total REAL NOT NULL,
-		date DATETIME NOT NULL,
+		date TIMESTAMP NOT NULL,
 		note TEXT,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		type TEXT DEFAULT 'compra',
 		usdt_received REAL DEFAULT 0,
 		image_url TEXT,
@@ -68,8 +84,8 @@ func InitDB() error {
 		name TEXT NOT NULL,
 		description TEXT,
 		goal REAL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY(user_id) REFERENCES users(id)
 	);`
 
@@ -89,8 +105,8 @@ func InitDB() error {
 		purchase_price REAL NOT NULL,
 		total REAL NOT NULL,
 		image_url TEXT,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY(bolsa_id) REFERENCES bolsas(id) ON DELETE CASCADE
 	);`
 
@@ -109,8 +125,8 @@ func InitDB() error {
 		target_value REAL NOT NULL,
 		active INTEGER DEFAULT 1,
 		triggered INTEGER DEFAULT 0,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY(bolsa_id) REFERENCES bolsas(id) ON DELETE CASCADE
 	);`
 
@@ -125,7 +141,7 @@ func InitDB() error {
 		id TEXT PRIMARY KEY,
 		bolsa_id TEXT NOT NULL,
 		tag TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(bolsa_id, tag),
 		FOREIGN KEY(bolsa_id) REFERENCES bolsas(id) ON DELETE CASCADE
 	);`
@@ -140,12 +156,12 @@ func InitDB() error {
 	CREATE TABLE IF NOT EXISTS investment_snapshots (
 		id TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
-		date DATETIME NOT NULL,
+		date TIMESTAMP NOT NULL,
 		total_value REAL NOT NULL,
 		total_invested REAL NOT NULL,
 		profit REAL NOT NULL,
 		profit_percentage REAL NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 	);`
 
@@ -167,4 +183,11 @@ func InitDB() error {
 	// Ejecutar migraciones para actualizar el esquema
 	err = RunMigrations()
 	return err
+}
+
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }
