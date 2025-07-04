@@ -22,7 +22,7 @@ func NewUserRepository() *UserRepository {
 func (r *UserRepository) CreateUser(user *models.User) error {
 	query := `
 		INSERT INTO users (id, email, password, name)
-		VALUES (?, ?, ?, ?)`
+		VALUES ($1, $2, $3, $4)`
 
 	_, err := r.db.Exec(query, user.ID, user.Email, user.Password, user.Name)
 	return err
@@ -57,7 +57,7 @@ func (r *UserRepository) GetAllUsers() ([]models.User, error) {
 
 func (r *UserRepository) GetUserById(id string) (*models.User, error) {
 	user := &models.User{}
-	query := `SELECT id, email, name, created_at FROM users WHERE id = ?`
+	query := `SELECT id, email, name, created_at FROM users WHERE id = $1`
 
 	err := r.db.QueryRow(query, id).Scan(
 		&user.ID,
@@ -75,7 +75,7 @@ func (r *UserRepository) GetUserById(id string) (*models.User, error) {
 
 func (r *UserRepository) GetUserByEmail(email string) (*models.User, error) {
 	user := &models.User{}
-	query := `SELECT id, email, password, name, created_at FROM users WHERE email = ?`
+	query := `SELECT id, email, password, name, created_at FROM users WHERE email = $1`
 
 	err := r.db.QueryRow(query, email).Scan(
 		&user.ID,
@@ -95,15 +95,15 @@ func (r *UserRepository) GetUserByEmail(email string) (*models.User, error) {
 func (r *UserRepository) UpdateUser(user *models.User) error {
 	query := `
 		UPDATE users 
-		SET email = ?, name = ?
-		WHERE id = ?`
+		SET email = $1, name = $2
+		WHERE id = $3`
 
 	_, err := r.db.Exec(query, user.Email, user.Name, user.ID)
 	return err
 }
 
 func (r *UserRepository) DeleteUser(id string) error {
-	query := `DELETE FROM users WHERE id = ?`
+	query := `DELETE FROM users WHERE id = $1`
 
 	_, err := r.db.Exec(query, id)
 	return err
@@ -115,7 +115,7 @@ func (r *UserRepository) UpdatePassword(email, password string) error {
 		return err
 	}
 
-	query := `UPDATE users SET password = ? WHERE email = ?`
+	query := `UPDATE users SET password = $1 WHERE email = $2`
 
 	_, err = r.db.Exec(query, string(hashedPassword), email)
 	return err
