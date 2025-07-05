@@ -1,17 +1,11 @@
 package middleware
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +15,7 @@ import (
 	"github.com/clerk/clerk-sdk-go/v2/jwt"
 	"github.com/clerk/clerk-sdk-go/v2/user"
 	"github.com/gin-gonic/gin"
+	svix "github.com/svix/svix-webhooks/go"
 )
 
 var userClient *user.Client
@@ -29,7 +24,8 @@ var userClient *user.Client
 func InitClerk() {
 	secretKey := os.Getenv("CLERK_SECRET_KEY")
 	if secretKey == "" {
-		panic("CLERK_SECRET_KEY environment variable is required")
+		log.Printf("WARNING: CLERK_SECRET_KEY environment variable is not set. Clerk features will be disabled.")
+		return
 	}
 	
 	// Set global Clerk key (recommended approach)
@@ -39,11 +35,20 @@ func InitClerk() {
 	config := &clerk.ClientConfig{}
 	config.Key = &secretKey
 	userClient = user.NewClient(config)
+	
+	log.Printf("Clerk initialized successfully")
 }
 
 // ClerkAuthMiddleware validates Clerk JWT tokens using the proper SDK approach
 func ClerkAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Check if Clerk is initialized
+		if userClient == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Clerk authentication not available"})
+			c.Abort()
+			return
+		}
+
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token no proporcionado"})
@@ -84,6 +89,12 @@ func ClerkAuthMiddleware() gin.HandlerFunc {
 
 // GetUserFromClerk retrieves user information from Clerk
 func GetUserFromClerk(c *gin.Context) {
+	// Check if Clerk is initialized
+	if userClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Clerk authentication not available"})
+		return
+	}
+
 	userID := c.GetString("userId")
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "ID de usuario no encontrado"})
@@ -113,48 +124,65 @@ func GetUserFromClerk(c *gin.Context) {
 	})
 }
 
-// WebhookHandler handles Clerk webhooks for user events
+// ClerkWebhookHandler handles Clerk webhooks for user events using Svix
 func ClerkWebhookHandler(c *gin.Context) {
+	log.Printf("=== WEBHOOK RECEIVED ===")
+	log.Printf("Headers: %+v", c.Request.Header)
+	
 	// Get the webhook signing secret from environment
 	webhookSecret := os.Getenv("CLERK_WEBHOOK_SECRET")
 	if webhookSecret == "" {
-		log.Printf("CLERK_WEBHOOK_SECRET environment variable is not set")
+		log.Printf("ERROR: CLERK_WEBHOOK_SECRET environment variable is not set")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Webhook secret not configured"})
 		return
 	}
+	log.Printf("Webhook secret found: %s", webhookSecret[:10]+"...")
 
 	// Read the raw body
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		log.Printf("Error reading request body: %v", err)
+		log.Printf("ERROR: reading request body: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not read request body"})
 		return
 	}
+	log.Printf("Request body length: %d", len(body))
+	log.Printf("Request body: %s", string(body))
 
-	// Verify the webhook signature
-	if !verifyWebhookSignature(body, c.GetHeader("svix-signature"), webhookSecret) {
-		log.Printf("Invalid webhook signature")
+	// Initialize Svix webhook with secret
+	wh, err := svix.NewWebhook(webhookSecret)
+	if err != nil {
+		log.Printf("ERROR: creating Svix webhook: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize webhook verification"})
+		return
+	}
+
+	// Verify the webhook using Svix
+	err = wh.Verify(body, c.Request.Header)
+	if err != nil {
+		log.Printf("ERROR: Svix webhook verification failed: %v", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid webhook signature"})
 		return
 	}
+	log.Printf("Webhook signature verified successfully with Svix")
 
 	// Parse the webhook payload from the body we already read
 	var webhookData map[string]interface{}
 	if err := json.Unmarshal(body, &webhookData); err != nil {
-		log.Printf("Error parsing JSON payload: %v", err)
+		log.Printf("ERROR: parsing JSON payload: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON payload"})
 		return
 	}
+	log.Printf("Webhook data parsed successfully: %+v", webhookData)
 
 	// Extract the event type
 	eventType, ok := webhookData["type"].(string)
 	if !ok {
-		log.Printf("Missing event type in webhook payload")
+		log.Printf("ERROR: Missing event type in webhook payload")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing event type"})
 		return
 	}
 
-	log.Printf("Received webhook event: %s", eventType)
+	log.Printf("Processing webhook event: %s", eventType)
 
 	// Handle different event types
 	switch eventType {
@@ -171,86 +199,38 @@ func ClerkWebhookHandler(c *gin.Context) {
 	}
 }
 
-// verifyWebhookSignature verifies the Clerk webhook signature
-func verifyWebhookSignature(body []byte, signature string, secret string) bool {
-	if signature == "" {
-		return false
-	}
-
-	// Parse the signature header
-	parts := strings.Split(signature, ",")
-	var timestamp, sig string
-	
-	for _, part := range parts {
-		if strings.HasPrefix(part, "t=") {
-			timestamp = strings.TrimPrefix(part, "t=")
-		} else if strings.HasPrefix(part, "v1=") {
-			sig = strings.TrimPrefix(part, "v1=")
-		}
-	}
-
-	if timestamp == "" || sig == "" {
-		return false
-	}
-
-	// Verify timestamp (should be within 5 minutes)
-	ts, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return false
-	}
-	
-	now := time.Now().Unix()
-	if now-ts > 300 { // 5 minutes tolerance
-		return false
-	}
-
-	// Create the expected signature
-	signedPayload := fmt.Sprintf("%s.%s", timestamp, body)
-	expectedSig := computeSignature(signedPayload, secret)
-	
-	// Compare signatures
-	return hmac.Equal([]byte(sig), []byte(expectedSig))
-}
-
-// computeSignature computes the HMAC signature for the webhook
-func computeSignature(payload string, secret string) string {
-	// Decode the base64-encoded secret
-	decodedSecret, err := base64.StdEncoding.DecodeString(secret)
-	if err != nil {
-		log.Printf("Error decoding webhook secret: %v", err)
-		return ""
-	}
-
-	// Create HMAC with SHA256
-	h := hmac.New(sha256.New, decodedSecret)
-	h.Write([]byte(payload))
-	
-	// Return hex-encoded signature
-	return hex.EncodeToString(h.Sum(nil))
-}
 
 // handleUserCreated creates a new user in the database when they sign up through Clerk
 func handleUserCreated(c *gin.Context, webhookData map[string]interface{}) {
+	log.Printf("=== HANDLING USER CREATED ===")
+	log.Printf("Full webhook data: %+v", webhookData)
+	
 	// Extract user data from webhook payload
 	data, ok := webhookData["data"].(map[string]interface{})
 	if !ok {
+		log.Printf("ERROR: Invalid webhook data structure")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid webhook data structure"})
 		return
 	}
+	log.Printf("User data extracted: %+v", data)
 
 	// Extract user ID
 	userID, ok := data["id"].(string)
 	if !ok {
+		log.Printf("ERROR: Missing user ID")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing user ID"})
 		return
 	}
+	log.Printf("User ID: %s", userID)
 
 	// Extract email addresses
 	emailAddresses, ok := data["email_addresses"].([]interface{})
 	if !ok || len(emailAddresses) == 0 {
+		log.Printf("ERROR: Missing email addresses")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing email addresses"})
 		return
 	}
+	log.Printf("Email addresses: %+v", emailAddresses)
 
 	// Get primary email
 	primaryEmail := ""
@@ -262,8 +242,10 @@ func handleUserCreated(c *gin.Context, webhookData map[string]interface{}) {
 			}
 		}
 	}
+	log.Printf("Primary email: %s", primaryEmail)
 
 	if primaryEmail == "" {
+		log.Printf("ERROR: No valid email found")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No valid email found"})
 		return
 	}
@@ -271,14 +253,17 @@ func handleUserCreated(c *gin.Context, webhookData map[string]interface{}) {
 	// Extract name information
 	firstName, _ := data["first_name"].(string)
 	lastName, _ := data["last_name"].(string)
+	log.Printf("Name info - First: %s, Last: %s", firstName, lastName)
 	
 	// Combine first and last name
 	fullName := strings.TrimSpace(firstName + " " + lastName)
 	if fullName == "" {
 		fullName = strings.Split(primaryEmail, "@")[0] // Use email username as fallback
 	}
+	log.Printf("Full name: %s", fullName)
 
 	// Create user in database
+	log.Printf("Creating user repository...")
 	userRepo := repository.NewUserRepository()
 	user := &models.User{
 		ID:        userID,
@@ -287,15 +272,17 @@ func handleUserCreated(c *gin.Context, webhookData map[string]interface{}) {
 		Password:  "", // No password needed for Clerk users
 		CreatedAt: time.Now(),
 	}
+	log.Printf("User object created: %+v", user)
 
+	log.Printf("Attempting to save user to database...")
 	err := userRepo.CreateUser(user)
 	if err != nil {
-		log.Printf("Error creating user in database: %v", err)
+		log.Printf("ERROR: creating user in database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
 
-	log.Printf("User created successfully: ID=%s, Email=%s, Name=%s", userID, primaryEmail, fullName)
+	log.Printf("SUCCESS: User created successfully: ID=%s, Email=%s, Name=%s", userID, primaryEmail, fullName)
 	c.JSON(http.StatusOK, gin.H{"message": "User created successfully"})
 }
 
