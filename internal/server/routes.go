@@ -1,8 +1,6 @@
 package routes
 
 import (
-	"net/http"
-
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/database"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/middleware"
 	"github.com/gin-gonic/gin"
@@ -15,7 +13,6 @@ func RegisterRoutes(router *gin.Engine) {
 	}
 
 	// Luego inicializar repositorios
-	middleware.InitAuth()
 	middleware.InitCrypto()
 	middleware.InitBolsa() // Inicializar el repositorio de bolsas
 	middleware.InitClerk() // Inicializar Clerk
@@ -27,29 +24,8 @@ func RegisterRoutes(router *gin.Engine) {
 
 	// Clerk authentication routes
 	router.GET("/user", middleware.ClerkAuthMiddleware(), middleware.GetUserFromClerk)
-	router.GET("/clerk/test", middleware.ClerkAuthMiddleware(), func(c *gin.Context) {
-		userID := c.GetString("userId")
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Clerk authentication successful",
-			"user_id": userID,
-			"authenticated_via": "clerk",
-		})
-	})
 	router.POST("/clerk/webhook", middleware.ClerkWebhookHandler)
 
-	// Legacy auth routes (you may want to remove these later)
-	router.POST("/signup", middleware.Signup)
-	router.POST("/login", middleware.Login)
-
-	// Configurar ruta de logout con opciones
-	router.OPTIONS("/logout", func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
-		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Status(200)
-	})
-	router.POST("/logout", middleware.AuthMiddleware(), middleware.Logout)
 
 	protected := router.Group("/")
 	protected.Use(middleware.ClerkAuthMiddleware())
@@ -110,6 +86,4 @@ func RegisterRoutes(router *gin.Engine) {
 		admin.GET("/users/email/:email", middleware.GetUserByEmail)
 	}
 
-	router.POST("/request-reset-password", middleware.RequestResetPassword)
-	router.POST("/reset-password", middleware.ResetPassword)
 }
