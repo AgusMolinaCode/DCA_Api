@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"net/http"
+
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/database"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/middleware"
 	"github.com/gin-gonic/gin"
@@ -16,12 +18,26 @@ func RegisterRoutes(router *gin.Engine) {
 	middleware.InitAuth()
 	middleware.InitCrypto()
 	middleware.InitBolsa() // Inicializar el repositorio de bolsas
+	middleware.InitClerk() // Inicializar Clerk
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
+	// Clerk authentication routes
+	router.GET("/user", middleware.ClerkAuthMiddleware(), middleware.GetUserFromClerk)
+	router.GET("/clerk/test", middleware.ClerkAuthMiddleware(), func(c *gin.Context) {
+		userID := c.GetString("userId")
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Clerk authentication successful",
+			"user_id": userID,
+			"authenticated_via": "clerk",
+		})
+	})
+	router.POST("/clerk/webhook", middleware.ClerkWebhookHandler)
+
+	// Legacy auth routes (you may want to remove these later)
 	router.POST("/signup", middleware.Signup)
 	router.POST("/login", middleware.Login)
 
@@ -36,7 +52,7 @@ func RegisterRoutes(router *gin.Engine) {
 	router.POST("/logout", middleware.AuthMiddleware(), middleware.Logout)
 
 	protected := router.Group("/")
-	protected.Use(middleware.AuthMiddleware())
+	protected.Use(middleware.ClerkAuthMiddleware())
 	{
 		protected.PUT("/users", middleware.UpdateUser)
 		protected.DELETE("/users", middleware.DeleteUser)
