@@ -14,7 +14,7 @@ require (
 require (
 	github.com/bytedance/sonic v1.12.8 // indirect
 	github.com/bytedance/sonic/loader v0.2.3 // indirect
-	github.com/clerk/clerk-sdk-go/v2 v2.3.1 // indirect
+	github.com/clerk/clerk-sdk-go/v2 v2.3.1 
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
 	github.com/gin-contrib/sse v1.0.0 // indirect
