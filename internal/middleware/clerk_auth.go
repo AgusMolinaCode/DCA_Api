@@ -39,6 +39,53 @@ func InitClerk() {
 	log.Printf("Clerk initialized successfully")
 }
 
+// SimpleAPIKeyMiddleware validates using user ID as API key
+func SimpleAPIKeyMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Try API key from header first
+		apiKey := c.GetHeader("X-API-Key")
+		
+		// If no API key header, try Authorization header with Bearer
+		if apiKey == "" {
+			authHeader := c.GetHeader("Authorization")
+			if authHeader != "" {
+				apiKey = strings.Replace(authHeader, "Bearer ", "", 1)
+			}
+		}
+
+		if apiKey == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "API Key requerido"})
+			c.Abort()
+			return
+		}
+
+		// Validate that the API key looks like a valid user ID (starts with "user_")
+		if !strings.HasPrefix(apiKey, "user_") {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "API Key inválido"})
+			c.Abort()
+			return
+		}
+
+		// Check if user exists in database
+		userRepo := repository.NewUserRepository()
+		user, err := userRepo.GetUserById(apiKey)
+		if err != nil {
+			log.Printf("User not found for API key: %s, error: %v", apiKey, err)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "API Key inválido"})
+			c.Abort()
+			return
+		}
+
+		// Store user ID in context
+		c.Set("userId", user.ID)
+		c.Set("userEmail", user.Email)
+		c.Set("userName", user.Name)
+		
+		log.Printf("User authenticated via API key: %s (%s)", user.ID, user.Email)
+		c.Next()
+	}
+}
+
 // ClerkAuthMiddleware validates Clerk JWT tokens using the proper SDK approach
 func ClerkAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {

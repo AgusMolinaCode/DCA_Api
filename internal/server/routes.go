@@ -28,7 +28,7 @@ func RegisterRoutes(router *gin.Engine) {
 
 
 	protected := router.Group("/")
-	protected.Use(middleware.ClerkAuthMiddleware())
+	protected.Use(middleware.SimpleAPIKeyMiddleware())
 	{
 		protected.PUT("/users", middleware.UpdateUser)
 		protected.DELETE("/users", middleware.DeleteUser)
