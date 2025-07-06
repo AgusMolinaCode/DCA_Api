@@ -435,3 +435,44 @@ func handleUserDeleted(c *gin.Context, webhookData map[string]interface{}) {
 	log.Printf("User deleted successfully: ID=%s", userID)
 	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
 }
+
+// CreateTestUser creates a test user for development purposes
+func CreateTestUser(c *gin.Context) {
+	var req struct {
+		ID    string `json:"id" binding:"required"`
+		Email string `json:"email" binding:"required"`
+		Name  string `json:"name" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create user in database
+	userRepo := repository.NewUserRepository()
+	user := &models.User{
+		ID:        req.ID,
+		Email:     req.Email,
+		Name:      req.Name,
+		Password:  "", // No password needed for API key auth
+		CreatedAt: time.Now(),
+	}
+
+	err := userRepo.CreateUser(user)
+	if err != nil {
+		log.Printf("Error creating test user: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		return
+	}
+
+	log.Printf("Test user created successfully: ID=%s, Email=%s, Name=%s", req.ID, req.Email, req.Name)
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Test user created successfully",
+		"user": gin.H{
+			"id":    req.ID,
+			"email": req.Email,
+			"name":  req.Name,
+		},
+	})
+}

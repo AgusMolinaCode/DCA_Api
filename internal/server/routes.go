@@ -25,6 +25,9 @@ func RegisterRoutes(router *gin.Engine) {
 	// Clerk authentication routes
 	router.GET("/user", middleware.ClerkAuthMiddleware(), middleware.GetUserFromClerk)
 	router.POST("/clerk/webhook", middleware.ClerkWebhookHandler)
+	
+	// Development endpoint to create test user
+	router.POST("/dev/create-user", middleware.CreateTestUser)
 
 
 	protected := router.Group("/")

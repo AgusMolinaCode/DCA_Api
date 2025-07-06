@@ -295,7 +295,7 @@ func (r *CryptoRepository) GetUserTransactionsWithDetails(userID string) ([]mode
 		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, 
 			   total, date, note, created_at, type, usdt_received, image_url
 		FROM crypto_transactions 
-		WHERE user_id = ? 
+		WHERE user_id = $1 
 		ORDER BY date DESC
 	`
 
@@ -1207,9 +1207,8 @@ func (r *CryptoRepository) GetInvestmentHistorySince(userID string, since time.T
 			profit,
 			profit_percentage
 		FROM investment_snapshots
-		WHERE user_id = ? AND date >= ?
-		GROUP BY strftime('%Y-%m-%d %H:%M', date)
-		ORDER BY minute ASC
+		WHERE user_id = $1 AND date >= $2
+		ORDER BY date ASC
 	`
 
 	rows, err := r.db.Query(query, userID, since)
@@ -1222,12 +1221,11 @@ func (r *CryptoRepository) GetInvestmentHistorySince(userID string, since time.T
 	snapshots := []models.InvestmentSnapshot{}
 	for rows.Next() {
 		var snapshot models.InvestmentSnapshot
-		var minuteStr string
 
 		err := rows.Scan(
 			&snapshot.ID,
 			&snapshot.UserID,
-			&minuteStr,
+			&snapshot.Date,
 			&snapshot.TotalValue,
 			&snapshot.TotalInvested,
 			&snapshot.Profit,
@@ -1235,12 +1233,6 @@ func (r *CryptoRepository) GetInvestmentHistorySince(userID string, since time.T
 		)
 		if err != nil {
 			return nil, fmt.Errorf("error al escanear snapshot: %v", err)
-		}
-
-		// Parsear la fecha del minuto
-		snapshot.Date, err = time.Parse("2006-01-02 15:04:05", minuteStr)
-		if err != nil {
-			return nil, fmt.Errorf("error al analizar fecha: %v", err)
 		}
 
 		snapshots = append(snapshots, snapshot)
