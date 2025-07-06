@@ -30,8 +30,6 @@ func RegisterRoutes(router *gin.Engine) {
 	protected := router.Group("/")
 	protected.Use(middleware.SimpleAPIKeyMiddleware())
 	{
-		protected.PUT("/users", middleware.UpdateUser)
-		protected.DELETE("/users", middleware.DeleteUser)
 
 		protected.POST("/transactions", middleware.CreateTransaction)
 		protected.GET("/transactions", middleware.GetUserTransactions)
@@ -67,23 +65,5 @@ func RegisterRoutes(router *gin.Engine) {
 		protected.DELETE("/investment/snapshots/:id", middleware.DeleteInvestmentSnapshot)
 	}
 
-	// Configurar opciones para rutas de administración
-	router.OPTIONS("/admin/*path", func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, Admin-Key")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Status(200)
-	})
-
-	// Rutas de admin
-	admin := router.Group("/admin")
-	admin.Use(middleware.AdminAuth())
-	{
-		admin.GET("/users", middleware.GetUsers)
-		admin.GET("/users/:id", middleware.GetUser)
-		admin.DELETE("/users/:id", middleware.DeleteUserByAdmin)
-		admin.GET("/users/email/:email", middleware.GetUserByEmail)
-	}
 
 }

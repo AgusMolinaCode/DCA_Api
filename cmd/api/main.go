@@ -34,7 +34,7 @@ func main() {
 	}
 	config.AllowOrigins = allowedOrigins
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization", "Admin-Key"}
+	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "X-API-Key", "Admin-Key"}
 	config.AllowCredentials = true
 	config.ExposeHeaders = []string{"Content-Length"}
 	router.Use(cors.New(config))
@@ -45,8 +45,6 @@ func main() {
 	}
 	defer database.DB.Close()
 
-	// Inicializar auth
-	middleware.InitAuth()
 
 	// Iniciar el servicio de actualización de precios (snapshots cada minuto)
 	log.Println("Iniciando servicio de actualización de precios...")
