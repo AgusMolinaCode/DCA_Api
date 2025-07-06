@@ -62,7 +62,7 @@ func (r *CryptoRepository) CreateTransaction(transaction models.CryptoTransactio
 		INSERT INTO crypto_transactions (
 			id, user_id, crypto_name, ticker, amount, purchase_price, 
 			total, date, note, created_at, type, usdt_received, image_url
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 
 	// Si la fecha está vacía, usar la fecha actual
