@@ -84,7 +84,7 @@ func GetInvestmentHistory(c *gin.Context) {
 		queryExisting := `
 			SELECT id, max_value, min_value 
 			FROM investment_snapshots 
-			WHERE user_id = ? AND 
+			WHERE user_id = $1 AND 
 			      date >= ? AND 
 			      date < ?
 			LIMIT 1
@@ -124,7 +124,7 @@ func GetInvestmentHistory(c *gin.Context) {
 			updateQuery := `
 				UPDATE investment_snapshots 
 				SET total_value = ?, total_invested = ?, profit = ?, profit_percentage = ?, max_value = ?, min_value = ? 
-				WHERE id = ?
+				WHERE id = $1
 			`
 
 			_, errUpdate := database.DB.Exec(
@@ -171,7 +171,7 @@ func GetInvestmentHistory(c *gin.Context) {
 	querySnapshots := `
 		SELECT id, user_id, date, total_value, total_invested, profit, profit_percentage, max_value, min_value
 		FROM investment_snapshots
-		WHERE user_id = ? AND date >= ?
+		WHERE user_id = $1 AND date >= $2
 		ORDER BY date ASC
 	`
 

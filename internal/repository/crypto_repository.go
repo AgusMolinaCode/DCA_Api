@@ -163,7 +163,7 @@ func (r *CryptoRepository) CreateTransaction(transaction models.CryptoTransactio
 func (r *CryptoRepository) UpdateTransaction(transaction models.CryptoTransaction) error {
 	// Verificar que la transacción exista y pertenezca al usuario
 	var existingUserId string
-	err := r.db.QueryRow("SELECT user_id FROM crypto_transactions WHERE id = ?", transaction.ID).Scan(&existingUserId)
+	err := r.db.QueryRow("SELECT user_id FROM crypto_transactions WHERE id = $1", transaction.ID).Scan(&existingUserId)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("transacción no encontrada.")
@@ -191,9 +191,9 @@ func (r *CryptoRepository) UpdateTransaction(transaction models.CryptoTransactio
 	// Actualizar la transacción
 	query := `
 		UPDATE crypto_transactions 
-		SET crypto_name = ?, ticker = ?, amount = ?, purchase_price = ?, 
-			total = ?, date = ?, note = ?, type = ?, usdt_received = ?, image_url = ?
-		WHERE id = ? AND user_id = ?
+		SET crypto_name = $1, ticker = $2, amount = $3, purchase_price = $4, 
+			total = $5, date = $6, note = $7, type = $8, usdt_received = $9, image_url = $10
+		WHERE id = $11 AND user_id = $12
 	`
 
 	// Calcular el total si no se especificó
@@ -224,7 +224,7 @@ func (r *CryptoRepository) UpdateTransaction(transaction models.CryptoTransactio
 func (r *CryptoRepository) DeleteTransaction(userID, transactionID string) error {
 	// Verificar que la transacción pertenezca al usuario
 	var count int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM crypto_transactions WHERE id = ? AND user_id = ?",
+	err := r.db.QueryRow("SELECT COUNT(*) FROM crypto_transactions WHERE id = $1 AND user_id = $2",
 		transactionID, userID).Scan(&count)
 	if err != nil {
 		return err
@@ -234,7 +234,7 @@ func (r *CryptoRepository) DeleteTransaction(userID, transactionID string) error
 	}
 
 	// Eliminar la transacción
-	_, err = r.db.Exec("DELETE FROM crypto_transactions WHERE id = ? AND user_id = ?",
+	_, err = r.db.Exec("DELETE FROM crypto_transactions WHERE id = $1 AND user_id = $2",
 		transactionID, userID)
 	return err
 }
@@ -242,7 +242,7 @@ func (r *CryptoRepository) DeleteTransaction(userID, transactionID string) error
 // DeleteTransactionsByTicker elimina todas las transacciones de una criptomoneda específica para un usuario
 func (r *CryptoRepository) DeleteTransactionsByTicker(userID, ticker string) error {
 	// Verificar que el ticker exista para el usuario
-	checkQuery := `SELECT COUNT(*) FROM crypto_transactions WHERE user_id = ? AND ticker = ?`
+	checkQuery := `SELECT COUNT(*) FROM crypto_transactions WHERE user_id = $1 AND ticker = $2`
 	var count int
 	err := r.db.QueryRow(checkQuery, userID, ticker).Scan(&count)
 	if err != nil {
@@ -265,7 +265,7 @@ func (r *CryptoRepository) DeleteTransactionsByTicker(userID, ticker string) err
 	}()
 
 	// Eliminar todas las transacciones con ese ticker
-	deleteQuery := `DELETE FROM crypto_transactions WHERE user_id = ? AND ticker = ?`
+	deleteQuery := `DELETE FROM crypto_transactions WHERE user_id = $1 AND ticker = $2`
 	result, err := tx.Exec(deleteQuery, userID, ticker)
 	if err != nil {
 		return err
@@ -448,7 +448,7 @@ func (r *CryptoRepository) GetCryptoDashboard(userID string) ([]models.CryptoDas
 	query := `
 		SELECT id, ticker, crypto_name, amount, purchase_price, total, type, image_url, date, usdt_received
 		FROM crypto_transactions
-		WHERE user_id = ?
+		WHERE user_id = $1
 		ORDER BY date ASC` // Ordenamos por fecha ascendente para procesar cronológicamente
 
 	rows, err := r.db.Query(query, userID)
@@ -632,7 +632,7 @@ func (r *CryptoRepository) GetTransactionDetails(userID string, transactionID st
 		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, 
 			   total, date, note, created_at, type, usdt_received, image_url
 		FROM crypto_transactions 
-		WHERE id = ? AND user_id = ?
+		WHERE id = $1 AND user_id = $2
 	`
 
 	var tx models.CryptoTransaction
@@ -772,7 +772,7 @@ func (r *CryptoRepository) GetRecentTransactions(userID string, limit int) ([]mo
 		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, 
 			   total, date, note, created_at, type, usdt_received, image_url
 		FROM crypto_transactions 
-		WHERE user_id = ? 
+		WHERE user_id = $1 
 		ORDER BY date DESC
 		LIMIT ?
 	`
@@ -923,7 +923,7 @@ func (r *CryptoRepository) getAveragePurchasePrice(userID string, ticker string,
 	query := `
 		SELECT AVG(purchase_price) 
 		FROM crypto_transactions 
-		WHERE user_id = ? AND ticker = ? AND date < ?
+		WHERE user_id = $1 AND ticker = $2 AND date < $3
 	`
 
 	var avgPrice float64
@@ -943,7 +943,7 @@ func (r *CryptoRepository) GetInvestmentHistory(userID string) (models.Investmen
 	query := `
 		SELECT id, ticker, crypto_name, amount, purchase_price, total, type, date
 		FROM crypto_transactions
-		WHERE user_id = ?
+		WHERE user_id = $1
 		ORDER BY date ASC`
 
 	rows, err := r.db.Query(query, userID)
@@ -1095,7 +1095,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 	query := `
 		SELECT id, max_value, min_value 
 		FROM investment_snapshots 
-		WHERE user_id = ? AND 
+		WHERE user_id = $1 AND 
 		      date >= ? AND 
 		      date < ?
 		LIMIT 1
@@ -1133,7 +1133,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshot(userID string, totalValue, tot
 		updateQuery := `
 			UPDATE investment_snapshots 
 			SET total_value = ?, total_invested = ?, profit = ?, profit_percentage = ?, max_value = ?, min_value = ? 
-			WHERE id = ?
+			WHERE id = $1
 		`
 
 		_, err = r.db.Exec(
@@ -1251,7 +1251,7 @@ func (r *CryptoRepository) GetInvestmentSnapshots(userID string) ([]models.Inves
 	query := `
 		SELECT id, user_id, date, total_value, total_invested, profit, profit_percentage
 		FROM investment_snapshots
-		WHERE user_id = ?
+		WHERE user_id = $1
 		ORDER BY date ASC
 	`
 
@@ -1288,7 +1288,7 @@ func (r *CryptoRepository) GetInvestmentSnapshots(userID string) ([]models.Inves
 func (r *CryptoRepository) DeleteInvestmentSnapshot(userID, snapshotID string) error {
 	// Verificar que el snapshot pertenezca al usuario
 	var count int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM investment_snapshots WHERE id = ? AND user_id = ?",
+	err := r.db.QueryRow("SELECT COUNT(*) FROM investment_snapshots WHERE id = $1 AND user_id = $2",
 		snapshotID, userID).Scan(&count)
 	if err != nil {
 		return err
@@ -1298,7 +1298,7 @@ func (r *CryptoRepository) DeleteInvestmentSnapshot(userID, snapshotID string) e
 	}
 
 	// Eliminar el snapshot
-	_, err = r.db.Exec("DELETE FROM investment_snapshots WHERE id = ? AND user_id = ?",
+	_, err = r.db.Exec("DELETE FROM investment_snapshots WHERE id = $1 AND user_id = $2",
 		snapshotID, userID)
 	return err
 }
@@ -1309,7 +1309,7 @@ func (r *CryptoRepository) UpdateSnapshotsMaxMinValues(userID string) (int, erro
 	query := `
 		SELECT id, total_value, max_value, min_value
 		FROM investment_snapshots
-		WHERE user_id = ?
+		WHERE user_id = $1
 	`
 
 	rows, err := r.db.Query(query, userID)
@@ -1356,7 +1356,7 @@ func (r *CryptoRepository) UpdateSnapshotsMaxMinValues(userID string) (int, erro
 			updateQuery := `
 				UPDATE investment_snapshots
 				SET max_value = ?, min_value = ?
-				WHERE id = ?
+				WHERE id = $1
 			`
 
 			_, err := r.db.Exec(updateQuery, newMaxValue, newMinValue, id)

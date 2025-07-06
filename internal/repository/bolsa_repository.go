@@ -49,7 +49,7 @@ func (r *BolsaRepository) CreateBolsa(bolsa models.Bolsa) error {
 	// Insertar la bolsa en la base de datos
 	_, err = tx.Exec(
 		`INSERT INTO bolsas (id, user_id, name, description, goal, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		bolsa.ID, bolsa.UserID, bolsa.Name, bolsa.Description, bolsa.Goal, bolsa.CreatedAt, bolsa.UpdatedAt,
 	)
 
@@ -63,7 +63,7 @@ func (r *BolsaRepository) GetBolsaByID(id string) (*models.Bolsa, error) {
 	// Obtener la bolsa
 	err := r.db.QueryRow(
 		`SELECT id, user_id, name, description, goal, created_at, updated_at 
-		FROM bolsas WHERE id = ?`, id,
+		FROM bolsas WHERE id = $1`, id,
 	).Scan(
 		&bolsa.ID, &bolsa.UserID, &bolsa.Name, &bolsa.Description, &bolsa.Goal, &bolsa.CreatedAt, &bolsa.UpdatedAt,
 	)
@@ -75,7 +75,7 @@ func (r *BolsaRepository) GetBolsaByID(id string) (*models.Bolsa, error) {
 	// Obtener los activos de la bolsa
 	rows, err := r.db.Query(
 		`SELECT id, bolsa_id, crypto_name, ticker, amount, purchase_price, total, image_url, created_at, updated_at 
-		FROM assets_in_bolsa WHERE bolsa_id = ?`, id,
+		FROM assets_in_bolsa WHERE bolsa_id = $1`, id,
 	)
 
 	if err != nil {
@@ -119,7 +119,7 @@ func (r *BolsaRepository) GetBolsaByID(id string) (*models.Bolsa, error) {
 	// Obtener las reglas de la bolsa
 	rows, err = r.db.Query(
 		`SELECT id, bolsa_id, type, ticker, target_value, active, triggered, created_at, updated_at 
-		FROM trigger_rules WHERE bolsa_id = ?`, id,
+		FROM trigger_rules WHERE bolsa_id = $1`, id,
 	)
 
 	if err != nil {
@@ -156,7 +156,7 @@ func (r *BolsaRepository) GetBolsasByUserID(userID string) ([]models.Bolsa, erro
 	// Obtener las bolsas del usuario
 	rows, err := r.db.Query(
 		`SELECT id, user_id, name, description, goal, created_at, updated_at 
-		FROM bolsas WHERE user_id = ?`, userID,
+		FROM bolsas WHERE user_id = $1`, userID,
 	)
 
 	if err != nil {
@@ -177,7 +177,7 @@ func (r *BolsaRepository) GetBolsasByUserID(userID string) ([]models.Bolsa, erro
 		// Obtener los activos de la bolsa
 		assetsRows, err := r.db.Query(
 			`SELECT id, bolsa_id, crypto_name, ticker, amount, purchase_price, total, image_url, created_at, updated_at 
-			FROM assets_in_bolsa WHERE bolsa_id = ?`, bolsa.ID,
+			FROM assets_in_bolsa WHERE bolsa_id = $1`, bolsa.ID,
 		)
 
 		if err != nil {
@@ -225,7 +225,7 @@ func (r *BolsaRepository) GetBolsasByUserID(userID string) ([]models.Bolsa, erro
 		// Obtener las reglas de la bolsa
 		rulesRows, err := r.db.Query(
 			`SELECT id, bolsa_id, type, ticker, target_value, active, triggered, created_at, updated_at 
-			FROM trigger_rules WHERE bolsa_id = ?`, bolsa.ID,
+			FROM trigger_rules WHERE bolsa_id = $1`, bolsa.ID,
 		)
 
 		if err != nil {
@@ -289,7 +289,7 @@ func (r *BolsaRepository) AddAssetToBolsa(asset models.AssetInBolsa) error {
 	// Insertar el activo en la base de datos
 	_, err = tx.Exec(
 		`INSERT INTO assets_in_bolsa (id, bolsa_id, crypto_name, ticker, amount, purchase_price, total, image_url, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		asset.ID, asset.BolsaID, asset.CryptoName, asset.Ticker, asset.Amount,
 		asset.PurchasePrice, asset.Total, asset.ImageURL, asset.CreatedAt, asset.UpdatedAt,
 	)
@@ -336,7 +336,7 @@ func (r *BolsaRepository) AddRuleToBolsa(rule models.TriggerRule) error {
 	// Insertar la regla en la base de datos
 	_, err = tx.Exec(
 		`INSERT INTO trigger_rules (id, bolsa_id, type, ticker, target_value, active, triggered, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		rule.ID, rule.BolsaID, rule.Type, rule.Ticker, rule.TargetValue,
 		active, triggered, rule.CreatedAt, rule.UpdatedAt,
 	)
@@ -376,14 +376,14 @@ func (r *BolsaRepository) UpdateRule(rule models.TriggerRule) error {
 	// Actualizar la regla en la base de datos
 	_, err = tx.Exec(
 		`UPDATE trigger_rules SET 
-			type = ?, 
-			ticker = ?, 
-			target_value = ?, 
-			active = ?, 
-			triggered = ?, 
-			updated_at = ? 
-		WHERE id = ?`,
-		rule.Type, rule.Ticker, rule.TargetValue, active, triggered, rule.UpdatedAt, rule.ID,
+			type = $2, 
+			ticker = $3, 
+			target_value = $4, 
+			active = $5, 
+			triggered = $6, 
+			updated_at = $7 
+		WHERE id = $1`,
+		rule.ID, rule.Type, rule.Ticker, rule.TargetValue, active, triggered, rule.UpdatedAt,
 	)
 
 	return err
@@ -407,12 +407,12 @@ func (r *BolsaRepository) UpdateBolsa(bolsa models.Bolsa) error {
 	// Actualizar la bolsa en la base de datos
 	_, err = tx.Exec(
 		`UPDATE bolsas SET 
-			name = ?, 
-			description = ?, 
-			goal = ?, 
-			updated_at = ? 
-		WHERE id = ?`,
-		bolsa.Name, bolsa.Description, bolsa.Goal, time.Now(), bolsa.ID,
+			name = $2, 
+			description = $3, 
+			goal = $4, 
+			updated_at = $5 
+		WHERE id = $1`,
+		bolsa.ID, bolsa.Name, bolsa.Description, bolsa.Goal, time.Now(),
 	)
 
 	return err
@@ -436,16 +436,16 @@ func (r *BolsaRepository) UpdateAsset(asset models.AssetInBolsa) error {
 	// Actualizar el activo en la base de datos
 	_, err = tx.Exec(
 		`UPDATE assets_in_bolsa SET 
-			crypto_name = ?, 
-			ticker = ?, 
-			amount = ?, 
-			purchase_price = ?, 
-			total = ?, 
-			image_url = ?, 
-			updated_at = ? 
-		WHERE id = ?`,
-		asset.CryptoName, asset.Ticker, asset.Amount, asset.PurchasePrice,
-		asset.Total, asset.ImageURL, time.Now(), asset.ID,
+			crypto_name = $2, 
+			ticker = $3, 
+			amount = $4, 
+			purchase_price = $5, 
+			total = $6, 
+			image_url = $7, 
+			updated_at = $8 
+		WHERE id = $1`,
+		asset.ID, asset.CryptoName, asset.Ticker, asset.Amount, asset.PurchasePrice,
+		asset.Total, asset.ImageURL, time.Now(),
 	)
 
 	return err
@@ -471,7 +471,7 @@ func (r *BolsaRepository) AddTagToBolsa(bolsaID string, tag string) error {
 
 	// Insertar la etiqueta en la base de datos
 	_, err = tx.Exec(
-		"INSERT INTO bolsa_tags (id, bolsa_id, tag) VALUES (?, ?, ?)",
+		"INSERT INTO bolsa_tags (id, bolsa_id, tag) VALUES ($1, $2, $3)",
 		tagID, bolsaID, tag,
 	)
 
@@ -495,7 +495,7 @@ func (r *BolsaRepository) RemoveTagFromBolsa(bolsaID string, tag string) error {
 
 	// Eliminar la etiqueta de la base de datos
 	_, err = tx.Exec(
-		"DELETE FROM bolsa_tags WHERE bolsa_id = ? AND tag = ?",
+		"DELETE FROM bolsa_tags WHERE bolsa_id = $1 AND tag = $2",
 		bolsaID, tag,
 	)
 
@@ -507,7 +507,7 @@ func (r *BolsaRepository) GetBolsasByTag(userID string, tag string) ([]models.Bo
 	rows, err := r.db.Query(
 		`SELECT DISTINCT b.* FROM bolsas b 
 		JOIN bolsa_tags t ON b.id = t.bolsa_id 
-		WHERE b.user_id = ? AND t.tag = ?`,
+		WHERE b.user_id = $1 AND t.tag = $2`,
 		userID, tag,
 	)
 	if err != nil {
@@ -568,7 +568,7 @@ func (r *BolsaRepository) GetBolsasByTag(userID string, tag string) ([]models.Bo
 // getTagsForBolsa obtiene todas las etiquetas de una bolsa
 func (r *BolsaRepository) getTagsForBolsa(bolsaID string) ([]string, error) {
 	rows, err := r.db.Query(
-		"SELECT tag FROM bolsa_tags WHERE bolsa_id = ?",
+		"SELECT tag FROM bolsa_tags WHERE bolsa_id = $1",
 		bolsaID,
 	)
 	if err != nil {
@@ -594,7 +594,7 @@ func (r *BolsaRepository) getTagsForBolsa(bolsaID string) ([]string, error) {
 func (r *BolsaRepository) getRulesForBolsa(bolsaID string) ([]models.TriggerRule, error) {
 	rows, err := r.db.Query(
 		`SELECT id, bolsa_id, type, ticker, target_value, active, triggered, created_at, updated_at 
-		FROM trigger_rules WHERE bolsa_id = ?`, bolsaID,
+		FROM trigger_rules WHERE bolsa_id = $1`, bolsaID,
 	)
 
 	if err != nil {
@@ -628,7 +628,7 @@ func (r *BolsaRepository) getRulesForBolsa(bolsaID string) ([]models.TriggerRule
 func (r *BolsaRepository) getAssetsForBolsa(bolsaID string) ([]models.AssetInBolsa, error) {
 	rows, err := r.db.Query(
 		`SELECT id, bolsa_id, crypto_name, ticker, amount, purchase_price, total, image_url, created_at, updated_at 
-		FROM assets_in_bolsa WHERE bolsa_id = ?`, bolsaID,
+		FROM assets_in_bolsa WHERE bolsa_id = $1`, bolsaID,
 	)
 
 	if err != nil {
@@ -686,7 +686,7 @@ func (r *BolsaRepository) RemoveAssetFromBolsa(assetID string, bolsaID string) e
 
 	// Eliminar el activo de la base de datos
 	_, err = tx.Exec(
-		`DELETE FROM assets_in_bolsa WHERE id = ? AND bolsa_id = ?`,
+		`DELETE FROM assets_in_bolsa WHERE id = $1 AND bolsa_id = $2`,
 		assetID, bolsaID,
 	)
 
@@ -710,7 +710,7 @@ func (r *BolsaRepository) DeleteBolsa(bolsaID string) error {
 
 	// Eliminar todas las etiquetas asociadas a la bolsa
 	_, err = tx.Exec(
-		`DELETE FROM bolsa_tags WHERE bolsa_id = ?`,
+		`DELETE FROM bolsa_tags WHERE bolsa_id = $1`,
 		bolsaID,
 	)
 	if err != nil {
@@ -719,7 +719,7 @@ func (r *BolsaRepository) DeleteBolsa(bolsaID string) error {
 
 	// Eliminar todas las reglas asociadas a la bolsa
 	_, err = tx.Exec(
-		`DELETE FROM trigger_rules WHERE bolsa_id = ?`,
+		`DELETE FROM trigger_rules WHERE bolsa_id = $1`,
 		bolsaID,
 	)
 	if err != nil {
@@ -728,7 +728,7 @@ func (r *BolsaRepository) DeleteBolsa(bolsaID string) error {
 
 	// Eliminar todos los activos asociados a la bolsa
 	_, err = tx.Exec(
-		`DELETE FROM assets_in_bolsa WHERE bolsa_id = ?`,
+		`DELETE FROM assets_in_bolsa WHERE bolsa_id = $1`,
 		bolsaID,
 	)
 	if err != nil {
@@ -737,7 +737,7 @@ func (r *BolsaRepository) DeleteBolsa(bolsaID string) error {
 
 	// Finalmente, eliminar la bolsa
 	_, err = tx.Exec(
-		`DELETE FROM bolsas WHERE id = ?`,
+		`DELETE FROM bolsas WHERE id = $1`,
 		bolsaID,
 	)
 

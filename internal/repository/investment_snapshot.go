@@ -32,9 +32,9 @@ func (r *CryptoRepository) SaveInvestmentSnapshotWithMaxMin(userID string, total
 	existingQuery := `
 		SELECT id, max_value, min_value 
 		FROM investment_snapshots 
-		WHERE user_id = ? AND 
-		      date >= ? AND 
-		      date < ?
+		WHERE user_id = $1 AND 
+		      date >= $2 AND 
+		      date < $3
 		LIMIT 1
 	`
 
@@ -70,7 +70,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshotWithMaxMin(userID string, total
 		}
 
 		// Eliminar el snapshot existente
-		_, err = r.db.Exec("DELETE FROM investment_snapshots WHERE id = ?", existingID)
+		_, err = r.db.Exec("DELETE FROM investment_snapshots WHERE id = $1", existingID)
 		if err != nil {
 			log.Printf("Error al eliminar snapshot existente: %v", err)
 			return err
@@ -136,7 +136,7 @@ func (r *CryptoRepository) GetInvestmentSnapshotsWithMaxMin(userID string, since
 	query := `
 		SELECT id, user_id, date, total_value, total_invested, profit, profit_percentage, max_value, min_value
 		FROM investment_snapshots
-		WHERE user_id = ? AND date >= ?
+		WHERE user_id = $1 AND date >= $2
 		ORDER BY date ASC
 	`
 

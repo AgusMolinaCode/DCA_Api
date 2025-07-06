@@ -102,9 +102,9 @@ func (a *cryptoRepositoryAdapter) SaveInvestmentSnapshot(userID string, totalVal
 	// Verificar si ya existe un snapshot para este intervalo de 5 minutos
 	existingQuery := `
 		SELECT id, max_value, min_value FROM investment_snapshots
-		WHERE user_id = ? AND 
-		      date >= ? AND 
-		      date < ?
+		WHERE user_id = $1 AND 
+		      date >= $2 AND 
+		      date < $3
 		ORDER BY date DESC
 		LIMIT 1
 	`
@@ -157,12 +157,13 @@ func (a *cryptoRepositoryAdapter) SaveInvestmentSnapshot(userID string, totalVal
 		
 		updateQuery := `
 			UPDATE investment_snapshots
-			SET total_value = ?, total_invested = ?, profit = ?, profit_percentage = ?, date = ?, max_value = ?, min_value = ?
-			WHERE id = ?
+			SET total_value = $2, total_invested = $3, profit = $4, profit_percentage = $5, date = $6, max_value = $7, min_value = $8
+			WHERE id = $1
 		`
 
 		_, err = a.db.Exec(
 			updateQuery,
+			existingID,
 			totalValue, // Actualizamos al valor actual
 			totalInvested,
 			profit,
@@ -170,7 +171,6 @@ func (a *cryptoRepositoryAdapter) SaveInvestmentSnapshot(userID string, totalVal
 			currentTime, // Actualizamos la hora
 			newMaxValue, // Valor máximo histórico
 			newMinValue, // Valor mínimo histórico
-			existingID,
 		)
 		
 		if err != nil {
@@ -191,7 +191,7 @@ func (a *cryptoRepositoryAdapter) SaveInvestmentSnapshot(userID string, totalVal
 	
 	insertQuery := `
 		INSERT INTO investment_snapshots (id, user_id, date, total_value, total_invested, profit, profit_percentage, max_value, min_value)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 
 	_, err = a.db.Exec(
@@ -227,9 +227,9 @@ func (a *cryptoRepositoryAdapter) GetInvestmentHistory(userID string, limit int)
 	query := `
 		SELECT id, user_id, date, total_value, total_invested, profit, profit_percentage
 		FROM investment_snapshots
-		WHERE user_id = ?
+		WHERE user_id = $1
 		ORDER BY date ASC
-		LIMIT ?
+		LIMIT $2
 	`
 
 	rows, err := a.db.Query(query, userID, limit)
@@ -267,7 +267,7 @@ func (a *cryptoRepositoryAdapter) GetInvestmentHistorySince(userID string, since
 	query := `
 		SELECT id, user_id, date, total_value, total_invested, profit, profit_percentage
 		FROM investment_snapshots
-		WHERE user_id = ? AND date >= ?
+		WHERE user_id = $1 AND date >= $2
 		ORDER BY date ASC
 	`
 
@@ -309,7 +309,7 @@ func (a *holdingsRepositoryAdapter) GetHoldings(userID string) (*models.Holdings
 	transactionsQuery := `
 		SELECT id, user_id, ticker, type, amount, purchase_price, total, date, usdt_received
 		FROM transactions
-		WHERE user_id = ?
+		WHERE user_id = $1
 		ORDER BY date DESC
 	`
 

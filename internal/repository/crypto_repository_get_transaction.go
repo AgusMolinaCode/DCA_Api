@@ -9,7 +9,7 @@ func (r *CryptoRepository) GetTransaction(transactionID string) (*models.CryptoT
 	query := `
 		SELECT id, user_id, crypto_name, ticker, amount, purchase_price, total, date, note
 		FROM crypto_transactions
-		WHERE id = ?
+		WHERE id = $1
 	`
 
 	var transaction models.CryptoTransaction

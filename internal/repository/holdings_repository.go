@@ -26,7 +26,7 @@ func (r *HoldingsRepository) UpdateHoldingsAfterSale(tx *sql.Tx, userID, ticker 
 	query := `
 		SELECT type, amount
 		FROM crypto_transactions
-		WHERE user_id = ? AND ticker = ?
+		WHERE user_id = $1 AND ticker = $2
 	`
 	rows, err := tx.Query(query, userID, ticker)
 	if err != nil {
