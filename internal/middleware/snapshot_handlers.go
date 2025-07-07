@@ -89,12 +89,37 @@ func ForceCreateSnapshot(c *gin.Context) {
 		return
 	}
 
-	// Versión simplificada para resolver el error de compilación
+	// Obtener las tenencias actuales del usuario
+	holdingsRepo := repository.NewHoldingsRepository(database.DB)
+	holdings, err := holdingsRepo.GetHoldings(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al obtener tenencias: %v", err)})
+		return
+	}
+
+	// Crear el snapshot con los datos reales
+	cryptoRepo := repository.NewCryptoRepository(database.DB)
+	err = cryptoRepo.SaveInvestmentSnapshotWithMaxMin(
+		userID,
+		holdings.TotalCurrentValue,
+		holdings.TotalInvested,
+		holdings.TotalProfit,
+		holdings.ProfitPercentage,
+	)
+	
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error al crear snapshot: %v", err)})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Snapshot creado exitosamente",
-		"snapshot_id": fmt.Sprintf("snapshot_%d", time.Now().UnixNano()),
 		"user_id": userID,
 		"date": time.Now().Format("2006-01-02 15:04:05"),
+		"total_value": holdings.TotalCurrentValue,
+		"total_invested": holdings.TotalInvested,
+		"profit": holdings.TotalProfit,
+		"profit_percentage": holdings.ProfitPercentage,
 	})
 }
 

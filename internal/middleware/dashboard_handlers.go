@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/database"
 	"github.com/AgusMolinaCode/DCA_Api.git/internal/repository"
+	"log"
 	"net/http"
 	"time"
 )
@@ -107,11 +108,25 @@ func GetCurrentBalance(c *gin.Context) {
 	// Convertir el ID a string
 	userIDStr := userID.(string)
 
-	// Obtener el balance usando la funciu00f3n existente
+	// Obtener el balance usando la función existente
 	balance, err := repository.GetUserCurrentBalance(database.DB, userIDStr)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Guardar automáticamente un snapshot del balance actual
+	cryptoRepo := repository.NewCryptoRepository(database.DB)
+	err = cryptoRepo.SaveInvestmentSnapshotWithMaxMin(
+		userIDStr,
+		balance.TotalBalance,
+		balance.TotalInvested,
+		balance.TotalProfit,
+		balance.ProfitPercentage,
+	)
+	if err != nil {
+		// Log el error pero no detener la respuesta
+		log.Printf("Error al guardar snapshot automático: %v", err)
 	}
 
 	c.JSON(http.StatusOK, balance)
