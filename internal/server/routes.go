@@ -64,7 +64,9 @@ func RegisterRoutes(router *gin.Engine) {
 		// Agregar la ruta para balance en tiempo real
 		protected.GET("/live-balance", middleware.GetDashboardLiveBalance)
 
-		// Ruta para eliminar snapshots de inversión
+		// Rutas para snapshots de inversión
+		protected.POST("/investment/snapshots/force-create", middleware.ForceCreateSnapshot)
+		protected.POST("/investment/snapshots/force-create-with-date", middleware.ForceCreateSnapshotWithDate)
 		protected.DELETE("/investment/snapshots/:id", middleware.DeleteInvestmentSnapshot)
 	}
 
