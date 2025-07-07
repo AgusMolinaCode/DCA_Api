@@ -79,7 +79,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshotWithMaxMin(userID string, total
 		// Insertar un nuevo snapshot con los valores actualizados
 		insertQuery := `
 			INSERT INTO investment_snapshots (id, user_id, date, total_value, total_invested, profit, profit_percentage, max_value, min_value)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		`
 
 		_, err = r.db.Exec(
@@ -104,7 +104,7 @@ func (r *CryptoRepository) SaveInvestmentSnapshotWithMaxMin(userID string, total
 		// Para un nuevo snapshot, el valor máximo y mínimo son iguales al valor actual
 		insertQuery := `
 			INSERT INTO investment_snapshots (id, user_id, date, total_value, total_invested, profit, profit_percentage, max_value, min_value)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		`
 
 		_, err = r.db.Exec(
