@@ -85,8 +85,8 @@ func GetInvestmentHistory(c *gin.Context) {
 			SELECT id, max_value, min_value 
 			FROM investment_snapshots 
 			WHERE user_id = $1 AND 
-			      date >= ? AND 
-			      date < ?
+			      date >= $2 AND 
+			      date < $3
 			LIMIT 1
 		`
 
@@ -123,19 +123,19 @@ func GetInvestmentHistory(c *gin.Context) {
 			// Actualizar el snapshot existente
 			updateQuery := `
 				UPDATE investment_snapshots 
-				SET total_value = ?, total_invested = ?, profit = ?, profit_percentage = ?, max_value = ?, min_value = ? 
+				SET total_value = $2, total_invested = $3, profit = $4, profit_percentage = $5, max_value = $6, min_value = $7 
 				WHERE id = $1
 			`
 
 			_, errUpdate := database.DB.Exec(
 				updateQuery,
+				existingID,
 				holdings.TotalCurrentValue,
 				holdings.TotalInvested,
 				holdings.TotalProfit,
 				holdings.ProfitPercentage,
 				newMaxValue,
 				newMinValue,
-				existingID,
 			)
 
 			if errUpdate != nil {
@@ -145,7 +145,7 @@ func GetInvestmentHistory(c *gin.Context) {
 			// No existe un snapshot para este intervalo, crear uno nuevo
 			insertQuery := `
 				INSERT INTO investment_snapshots (id, user_id, date, total_value, total_invested, profit, profit_percentage, max_value, min_value)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			`
 
 			_, errInsert := database.DB.Exec(
