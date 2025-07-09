@@ -28,7 +28,7 @@ func main() {
 
 	// Configurar CORS
 	config := cors.DefaultConfig()
-	allowedOrigins := []string{"http://localhost:3000"}
+	allowedOrigins := []string{"http://localhost:3000", "https://dca-api-front.vercel.app/"}
 	if frontendURL := os.Getenv("FRONTEND_URL"); frontendURL != "" {
 		allowedOrigins = append(allowedOrigins, frontendURL)
 	}
